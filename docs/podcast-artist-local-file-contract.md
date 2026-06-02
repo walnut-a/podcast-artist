@@ -13,7 +13,7 @@
 ## 1. 核心原则
 
 - 文件是事实来源，SQLite 是索引和查询加速层。
-- 项目内容默认明文可读，凭证例外，API key 和 token 不进入项目文件夹。
+- 项目内容默认明文可读，API key 和 token 不进入项目文件夹；应用也不使用系统钥匙串代管凭证。
 - 每个模块拥有自己的文件边界，不把关键状态藏进另一个模块的缓存。
 - 正式文件写入必须可恢复：写入前有快照，写入中有 journal，失败后有可读错误。
 - 外部 agent 可以直接读取项目文件夹，但写入正式内容时应通过任务账本或写入队列。
@@ -152,7 +152,7 @@ workspace/
 
 ## 4. 应用级 settings.json
 
-`settings.json` 保存本机设置。它可以明文保存路径和 profile id，但不保存 API key 明文。
+`settings.json` 保存本机设置。它可以明文保存路径和 profile id，但不保存 API key 明文，也不保存钥匙串引用。
 
 ```json
 {
@@ -192,7 +192,7 @@ workspace/
       "displayName": "Local OpenAI-compatible",
       "baseUrl": "http://localhost:11434/v1",
       "model": "qwen3",
-      "secretRef": null,
+      "credentialSource": { "kind": "none" },
       "capabilities": ["chat", "rewrite", "research"]
     },
     {
@@ -201,7 +201,7 @@ workspace/
       "displayName": "Local whisper.cpp",
       "baseUrl": null,
       "model": "ggml-small.bin",
-      "secretRef": null,
+      "credentialSource": { "kind": "none" },
       "capabilities": ["transcription"]
     },
     {
@@ -210,14 +210,23 @@ workspace/
       "displayName": "User configured online transcription",
       "baseUrl": "https://api.example.com",
       "model": "transcribe-model",
-      "secretRef": "keychain:podcast-artist/prv_online_transcription",
+      "credentialSource": {
+        "kind": "environment",
+        "envVar": "PODCAST_ARTIST_TRANSCRIPTION_API_KEY"
+      },
       "capabilities": ["transcription"]
     }
   ]
 }
 ```
 
-`secretRef` 指向 OS keychain、Electron safeStorage 或等价安全存储。外部 agent 可以读到 profile 的存在和用途，但不应该拿到密钥明文。
+`credentialSource` 只记录凭证来源，不记录凭证本体。支持的策略是：
+
+- `none`：本地 provider 或不需要密钥的服务。
+- `environment`：只记录环境变量名，由用户在系统或启动脚本中自行提供。
+- `runtime_prompt`：需要调用时临时输入，不落盘。
+
+应用不使用 OS keychain、Electron safeStorage 或类似安全存储。外部 agent 可以读到 profile 的存在、用途和凭证来源方式，但不应该从项目文件或应用配置中拿到密钥明文。
 
 ## 6. dependency-status.json
 
@@ -625,7 +634,7 @@ status: accepted
 }
 ```
 
-波纹剪辑改变的是 clips 的排列和时间，不改变源文件。导出时由本地音频引擎读取 `assetId` 对应的素材副本和这份 plan 生成新音频。
+波纹剪辑改变的是 clips 的排列和时间，不改变源文件。删除 clip、更新 clip 的 `sourceStartMs` / `sourceEndMs`、插入空白或移动片段，都应该先落到 edit plan。更新某个 clip 时，应用可以按同轨 ripple 规则调整后续 clip 的 `timelineStartMs`，确保剪辑计划保持连续。导出时由本地音频引擎读取 `assetId` 对应的素材副本和这份 plan 生成新音频。
 
 ## 17. 导出和 render 记录
 

@@ -1,0 +1,33 @@
+{
+  "name": "podcast-artist",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first podcast creation workstation prototype.",
+  "type": "module",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "wavesurfer.js": "^7.12.7"
+  },
+  "devDependencies": {
+    "@swc/core": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "^5.1.1",
+    "electron": "latest",
+    "electron-vite": "5.0.0",
+    "typescript": "latest",
+    "vite": "7.3.5",
+    "vitest": "latest"
+  }
+}

@@ -9,12 +9,13 @@
 
 - 桌面框架：Electron。
 - 前端：React + TypeScript + Vite + electron-vite。
+- UI 基础组件：Base UI 作为无样式、可访问性组件底座，视觉仍由项目自定义 CSS 控制。
 - 文稿编辑：Markdown 作为正式文稿格式；Tiptap/ProseMirror 作为增强编辑层和结构化编辑器内核。
 - 本地存储：workspace 素材库 + 项目文件夹 + 透明本地文件 + SQLite 索引。优先验证 Electron 当前 Node 运行时里的 `node:sqlite`，不满足再退到 `better-sqlite3`。
 - 数据访问：Drizzle ORM 或轻量 SQL repository 层，先避免重 ORM。
 - AI 任务：自研本地任务队列 + Provider 抽象，支持 OpenAI-compatible endpoint、自定义 base URL、用户自带 API key；不提供官方托管服务。
 - Agent/工具协议：MVP 不直接押注 ACP；先做内部任务协议，后续提供 ACP/MCP adapter。
-- 音频 UI：自研轻量时间线数据模型 + Canvas 波形渲染。wavesurfer.js、Peaks.js、Waveform Playlist 可作为原型参考，但不建议把核心剪辑状态绑死在第三方 UI 库里。
+- 音频 UI：自研轻量时间线数据模型 + WaveSurfer.js 波形/播放适配层。WaveSurfer 只负责 waveform/player/timeline 预览和播放头，不作为核心剪辑状态或导出依据，也不把自由拖拽选区作为主要剪辑输入。
 - 波形数据：导入时预生成 peaks，不在浏览器里完整 decode 长音频。
 - 长音频策略：素材库资产、代理音频、peaks、局部预览缓存、edit plan 分层处理。
 - 音频处理与导出：桌面端调用原生 FFmpeg binary，负责混音、裁切、淡入淡出、标准化和导出；降噪先保留 provider/配置入口。
@@ -35,7 +36,7 @@
 - 数据结构要面向用户手动管理、备份、迁移和排查问题，不以隐藏或加密项目内容为主要目标。
 - 模块间格式要尽量明文、稳定、可被外部 agent 或脚本读取，避免复杂私有数据格式造成耦合。
 - 后续可能要支持用户自带模型、API key、工具协议和本地二进制。
-- 音频能力定位是播客草剪，不是完整 DAW。
+- 音频能力定位是播客剪辑，不是完整 DAW。
 
 ## 3. 桌面框架
 
@@ -81,6 +82,24 @@ src/
   renderer/    React UI
   shared/      types, timeline ops, provider contracts
 ```
+
+### UI 组件底座：Base UI
+
+推荐引入 Base UI 作为 React 无样式组件底座，用在 Dialog、Popover、Menu、Select、Tabs、Toolbar、Tooltip、Toast、Slider、Number Field、Scroll Area 等基础交互上。
+
+选择理由：
+
+- Base UI 是无样式组件库，不捆绑 CSS，不会破坏当前深色终端风格。
+- 它面向 React，适合当前 renderer 技术栈。
+- 它提供可访问性和复杂交互行为，能减少项目自己维护菜单、弹层、选择器、滑杆、工具栏等边界细节的成本。
+- 设置页、音频工具栏、时间线右键菜单、资料任务弹层、导出参数面板都需要这些底层交互。
+
+使用边界：
+
+- Base UI 只作为行为和可访问性底座，不作为视觉设计系统。
+- 项目继续使用自定义 CSS token 和深色视觉语言。
+- 不为了引入 Base UI 重写已有页面；在新增复杂控件或替换明显脆弱的自制控件时逐步接入。
+- 不把 Base UI 表单状态当作业务状态来源，正式状态仍落在本地文件和共享类型里。
 
 ## 5. 文稿编辑器
 
@@ -185,7 +204,7 @@ SQLite 存索引和查询加速：
 
 这种结构的取舍是：SQLite 不再是唯一事实来源，而是项目文件夹和素材库的索引层。重要状态优先能在本地文件中解释和恢复。
 
-项目内容默认不做加密或混淆。这个设计目标不是把数据藏起来，而是让用户能手动翻找、备份、迁移和排查问题。API key、访问 token 等凭证例外，应该用系统 keychain、Electron safeStorage 或等价机制保存，不进入项目文件夹的明文内容。
+项目内容默认不做加密或混淆。这个设计目标不是把数据藏起来，而是让用户能手动翻找、备份、迁移和排查问题。应用不使用系统钥匙串或 Electron safeStorage 代管 API key、访问 token 等凭证；需要在线服务时，凭证由用户通过环境变量、外部本地服务或运行时临时输入自行管理，不进入项目文件夹。
 
 项目文件夹同时也是外部 agent 的可读协议层。Markdown、任务账本、write intent、transcript、asset index 和 edit plan 应尽量用明文格式保存；SQLite 可以保存索引和状态加速，但不应该成为外部工具唯一能读懂的入口。这样每个模块可以独立处理自己的任务，减少跨模块同步成本，也让用户可以用脚本或 agent 单独处理某一层数据。
 
@@ -328,7 +347,7 @@ OpenAI Responses API 适合工具调用、内置 web search、文件搜索等能
 
 - 本地工具链：FFmpeg、ffprobe、whisper.cpp、模型文件、后续降噪工具。
 - Provider profiles：AI、资料检索、转写、降噪的 base URL、模型名、能力标签。
-- 凭证：API key / token 的配置状态和更新入口，不长期显示明文。
+- 凭证来源：显示 provider 是否需要凭证，以及凭证来自环境变量、外部服务还是运行时临时输入；应用不保存密钥明文，也不保存钥匙串引用。
 - 存储：workspace、library、项目默认位置、模型文件目录。
 - 诊断：一键检查、最近一次检查结果、错误原因、版本信息。
 
@@ -412,10 +431,10 @@ FFmpeg 是 P0 必须检查的依赖，因为 proxy、peaks 前处理、标准化
 
 建议：
 
-- 默认只检查配置完整性：base URL、模型名、key ref 是否存在。
+- 默认只检查配置完整性：base URL、模型名、凭证来源是否完整。
 - 提供手动“测试连接”按钮。
 - 测试连接只发最小请求，不上传项目文稿或音频。
-- API key 存在状态可显示，key 本身不回显。
+- API key 本身不进入应用配置；如使用环境变量，只展示变量名和是否可读取到值，不展示值本身。
 - 每个 provider profile 标注用途：chat、research、transcription、denoise。
 
 ### 配置文件
@@ -423,10 +442,10 @@ FFmpeg 是 P0 必须检查的依赖，因为 proxy、peaks 前处理、标准化
 应用级配置可以拆成：
 
 - `settings.json`：workspace 路径、工具路径、模型目录、默认 profile id。
-- `provider-profiles.json`：provider 类型、base URL、模型名、能力标签、secret ref。
+- `provider-profiles.json`：provider 类型、base URL、模型名、能力标签、凭证来源类型。
 - `dependency-status.json`：最近一次依赖检查结果缓存，可以删除后重建。
 
-凭证保存到 OS keychain 或 Electron safeStorage，不进入这些明文配置文件。
+凭证不保存到 OS keychain 或 Electron safeStorage。应用级配置只允许记录凭证来源，例如 `none`、环境变量名或运行时临时输入。
 
 ## 9. 音频时间线与波形
 
@@ -456,7 +475,7 @@ SQLite / 文件系统
 
 调研到的库：
 
-- wavesurfer.js：官方插件有 Regions、Timeline、Envelope、Record 等，适合单条或少量音频的波形交互。
+- wavesurfer.js：官方插件有 Regions、Timeline、Envelope、Record 等，适合单条或少量音频的波形交互。MVP 可以优先采用它作为 waveform/player/timeline UI 适配层，但不建议把用户自由拖拽 regions 当成主要剪辑入口。
 - Peaks.js：支持 zoom、scroll、point/segment marker，也强调长音频应该用预生成 waveform data。
 - Waveform Playlist：提供多轨、trim、split、fade、WAV export 等能力，适合作为原型参考。
 
@@ -471,8 +490,11 @@ SQLite / 文件系统
 因此推荐：
 
 - 自研 timeline 数据模型。
-- 自研 Canvas 波形 renderer，先只画 peaks，不做复杂 DAW UI。
-- 可借鉴 wavesurfer/Peaks/Waveform Playlist 的交互，但不要把项目文件格式绑到它们。
+- 第一版 UI 使用 WaveSurfer.js 消费项目生成的 proxy 和 peaks，承担 waveform/player/hover/timeline 等预览交互。
+- 剪辑输入优先来自转写文本锚点、clip 列表、时间码控件、播放头定位和 nudge/step 微调，而不是要求用户在波形上精准框选。候选片段可以在波形上视觉高亮，但不应作为项目文件格式的一部分。
+- Clip 列表编辑是 MVP 的第一层可操作时间线：手动输入毫秒或 timecode、用播放头写入起止点、微调边界后，通过 edit plan API 更新源起止时间，并按同轨 ripple 规则调整后续 clip。
+- 最终导出仍由 FFmpeg 根据同一份 edit plan 渲染，不由 WaveSurfer 导出。
+- 如果后续发现 WaveSurfer 的渲染和交互边界不够，再替换为自研 Canvas renderer；因为核心状态在 edit plan，替换成本可控。
 
 ### 时间线数据原则
 
@@ -485,7 +507,7 @@ SQLite / 文件系统
 
 ### 长音频波形
 
-wavesurfer.js 官方说明，大文件在浏览器中完整 decode 可能因为内存限制失败，并建议使用 pre-decoded peaks。
+wavesurfer.js 官方说明，大文件在浏览器中完整 decode 可能因为内存限制失败，并建议使用 pre-decoded peaks。它也明确不是音频处理或剪辑效果引擎，所以在 Podcast Artist 里只能作为播放和波形交互层，不能接管非破坏性剪辑计划或最终导出。
 
 纯本地应用里也不应该把两小时音频一次性丢进 renderer 解码。长音频应该拆成四层：
 
@@ -616,12 +638,13 @@ Electron 安全建议必须从第一天执行：
 - 不加载不可信远程页面。
 - 外部链接用系统浏览器打开。
 - 所有本地文件访问都走 main process。
-- API key 不进入 renderer 明文长期状态。
+- API key 不进入 renderer 明文长期状态，也不写入应用配置或项目文件。
 
 API key 存储：
 
-- MVP 可先用 Electron safeStorage 或 OS keychain 方向。
-- 项目数据库不存明文 key。
+- MVP 不提供应用内密钥保存能力。
+- 支持用户通过环境变量、外部本地 provider 或运行时临时输入提供 key。
+- 项目数据库不存明文 key，也不存钥匙串引用。
 - 导出项目时不包含本机密钥。
 
 ## 13. 测试策略
@@ -673,7 +696,7 @@ API key 存储：
 | --- | --- | --- | --- |
 | 桌面框架 | Electron | Tauri | 前端复杂 UI + Node 子进程 + 本地工具链更顺 |
 | 构建 | electron-vite + Vite | Electron Forge template | main/preload/renderer 分离清晰 |
-| UI | React + TypeScript | Svelte/Vue | 复杂工具界面生态成熟 |
+| UI | React + TypeScript + Base UI | Svelte/Vue / 自制控件 | 复杂工具界面生态成熟，Base UI 提供无样式可访问性底座 |
 | 文稿编辑 | Markdown + Tiptap/ProseMirror | 纯 Markdown editor / Lexical | Markdown 是正式文稿，Tiptap 提供增强编辑和段落交互 |
 | 素材库 | Project-scoped LibraryAsset | 直接引用外部文件路径 | 导入创建副本，文档/转写/剪辑统一引用 assetId |
 | DB | SQLite 索引 | 纯 JSON files | 任务、段落、转写、时间线需要查询和事务，但 SQLite 不做唯一事实来源 |
@@ -681,8 +704,8 @@ API key 存储：
 | DB schema | Drizzle / SQL repository | Prisma | SQLite 桌面端更轻，迁移可控 |
 | AI | Provider abstraction | 单一 OpenAI SDK | 支持自带 key 和多供应商 |
 | 工具协议 | 内部 task protocol，后续 MCP/ACP adapter | 直接 ACP | MVP 避免协议绑死 |
-| 设置页 | 本地依赖诊断 + Provider profiles | 只做表单配置 | 需要真实管理 FFmpeg、ffprobe、whisper.cpp、模型文件和 key 状态 |
-| 波形 | 预生成 peaks + Canvas | wavesurfer.js | 长音频稳定、可控 |
+| 设置页 | 本地依赖诊断 + Provider profiles | 只做表单配置 | 需要真实管理 FFmpeg、ffprobe、whisper.cpp、模型文件和凭证来源状态 |
+| 波形 | WaveSurfer.js + 预生成 peaks | 自研 Canvas / Peaks.js | 先借助成熟播放器和预览能力，核心状态仍由 edit plan 掌控 |
 | 时间线 | 自研 timeline model | Waveform Playlist | 需要 ripple/text-sync/export 一致 |
 | 播放 | Web Audio / HTMLMediaElement | Tone.js | MVP 先简单可靠 |
 | 导出 | 原生 FFmpeg | ffmpeg.wasm | 长音频性能和稳定性更好 |
@@ -751,6 +774,8 @@ API key 存储：
 - Tauri security: https://v2.tauri.app/security/
 - Vite getting started: https://vite.dev/guide/
 - electron-vite TypeScript: https://electron-vite.org/guide/typescript
+- Base UI: https://base-ui.com/
+- Base UI quick start: https://base-ui.com/react/overview/quick-start
 - Node SQLite: https://nodejs.org/api/sqlite.html
 - Drizzle SQLite: https://orm.drizzle.team/docs/get-started-sqlite
 - ProseMirror guide: https://prosemirror.net/docs/guide/
