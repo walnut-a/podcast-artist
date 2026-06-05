@@ -43,16 +43,16 @@ Podcast Artist 是一个本地优先的播客创作工具构想，面向录音�
 - 文稿写入队列：创建 Markdown append intent，串行应用 pending intent，写入前生成文档版本快照，base hash 不匹配时进入 failed。
 - 资料任务账本：创建研究任务目录，保存 `task.json`、`context.md`、`result.md`，并支持把任务结果通过 write journal 采纳进 `episode.md`。
 - 项目素材库读取：按项目读取 `assets.json`，供文稿、转写和剪辑模块通过 `assetId` 引用。
-- 音频 edit plan：读取 `pln_rough_cut.json`，把音频素材加入非破坏性 clips，支持基础 ripple delete 和 clip 源起止时间更新。
+- 音频 edit plan：读取 `pln_rough_cut.json`，默认创建两条音轨；把音频素材加入非破坏性 clips，支持新增音轨、重命名音轨、静音音轨、删除空音轨、基础 ripple delete 和 clip 源起止时间更新。
 - 音频素材分析：调用 ffprobe 生成 `.podcast-artist/audio-cache/analysis/<assetId>.json`，并把时长、采样率、声道数等元信息回写到素材索引。
 - 音频处理缓存：调用 FFmpeg 生成项目内 proxy WAV 和 peaks JSON，源文件和素材库副本始终不被修改。
 - 基础 WaveSurfer 波形预览：renderer 通过受控 IPC 读取当前项目素材的 proxy URL 和 peaks，只有已有 peaks 时才渲染波形，避免长音频整段浏览器解码。
-- 导出渲染：根据 `pln_rough_cut.json` 和素材库副本构造 FFmpeg 命令，生成 WAV 导出文件，并写入 `.podcast-artist/renders/` render job。
+- 导出渲染：根据 `pln_rough_cut.json` 和素材库副本构造 FFmpeg 命令，跳过静音音轨，生成 WAV 导出文件，并写入 `.podcast-artist/renders/` render job。
 - 设置页依赖诊断：检测 FFmpeg、ffprobe、whisper.cpp binary 和模型文件状态。
 - Provider profiles 管理：明文保存 base URL、模型名和凭证来源类型；不保存 API key，不使用系统钥匙串。
-- 深色本地工作站 UI：以项目为一级入口；打开项目后进入沉浸式项目模式，一次只操作一个项目，左上角返回项目页；项目内包含素材库、文稿、剪辑三个模块，设置页独立；剪辑视图已支持 clip 时间码输入、播放头写入起止点和边界微调。
+- 深色本地工作站 UI：以项目为一级入口；打开项目后进入沉浸式项目模式，一次只操作一个项目，左上角返回项目页；项目内包含素材库、文稿、剪辑三个模块，设置页独立；剪辑视图支持从项目素材库拖入音频到不同音轨，并提供添加音轨、重命名、静音和删除空音轨的基础多轨操作。
 
-仍处于规划或未实现状态的能力包括真实转写、完整可视化音频时间线、文本/转写驱动的片段操作、多轨混音细节、真实 AI provider 调用、provider 健康检查和 SQLite 索引层。WaveSurfer 当前只作为波形和播放预览，不把自由拖拽选区作为主要剪辑输入。
+仍处于规划或未实现状态的能力包括真实转写、文本/转写驱动的片段操作、多轨混音细节、真实 AI provider 调用、provider 健康检查和 SQLite 索引层。WaveSurfer 当前只作为波形和播放预览，不把自由拖拽选区作为主要剪辑输入。
 
 ## 对外入口
 

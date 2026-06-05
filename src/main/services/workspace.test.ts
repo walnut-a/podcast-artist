@@ -9,9 +9,11 @@ import {
   appendTaskResultToDocument,
   applyPendingWriteIntents,
   buildFfmpegRenderArgs,
+  createAudioTrackInEditPlan,
   createResearchTask,
   createMarkdownAppendIntent,
   createProject,
+  deleteAudioTrackInEditPlan,
   ensureWorkspace,
   exportAudioEditPlan,
   generateAudioPeaks,
@@ -20,7 +22,9 @@ import {
   readAudioAssetPlaybackData,
   readAudioEditPlan,
   readProjectLibrary,
+  readProjectTasks,
   rippleDeleteAudioClip,
+  updateAudioTrackInEditPlan,
   updateAudioClipTiming
 } from './workspace';
 
@@ -178,6 +182,7 @@ describe('workspace local file contract', () => {
     await expectFile(path.join(taskRoot, 'task.json'));
     expect(await readFile(path.join(taskRoot, 'context.md'), 'utf8')).toContain('用户正在查看');
     expect(await readFile(path.join(taskRoot, 'result.md'), 'utf8')).toContain('本地优先可以降低长期维护成本');
+    expect((await readProjectTasks(settings, project.id)).map((item) => item.id)).toEqual([task.id]);
 
     const appendResult = await appendTaskResultToDocument(settings, {
       projectId: project.id,
@@ -188,6 +193,64 @@ describe('workspace local file contract', () => {
     expect(appendResult.applyResult.applied).toBe(1);
     expect(appendResult.intent.sourceTaskId).toBe(task.id);
     expect(appendResult.document.content).toContain('本地优先可以降低长期维护成本');
+    const [appliedTask] = await readProjectTasks(settings, project.id);
+    expect(appliedTask.writeIntentPath).toContain('write-journal');
+  });
+
+  it('creates audio edit plans with two default tracks and can add more tracks', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: 'Tracks' });
+
+    const initialPlan = await readAudioEditPlan(settings, project.id);
+    expect(initialPlan.tracks.map((track) => track.name)).toEqual(['音轨 1', '音轨 2']);
+
+    const nextPlan = await createAudioTrackInEditPlan(settings, { projectId: project.id });
+    expect(nextPlan.tracks.map((track) => track.name)).toEqual(['音轨 1', '音轨 2', '音轨 3']);
+  });
+
+  it('updates an audio track name and mute state in the edit plan', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: 'Track Settings' });
+    const initialPlan = await readAudioEditPlan(settings, project.id);
+    const trackId = initialPlan.tracks[0]?.id;
+    expect(trackId).toBeTruthy();
+
+    const nextPlan = await updateAudioTrackInEditPlan(settings, {
+      projectId: project.id,
+      trackId: trackId!,
+      name: '主持人',
+      muted: true
+    });
+
+    expect(nextPlan.tracks[0]).toMatchObject({
+      id: trackId,
+      name: '主持人',
+      muted: true
+    });
+  });
+
+  it('deletes empty audio tracks but keeps tracks that contain clips', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: 'Delete Tracks' });
+    const sourcePath = path.join(tempDir, 'host.wav');
+    await writeFile(sourcePath, Buffer.from('host audio data'));
+    const asset = await importLibraryAsset(settings, { projectId: project.id, sourcePath, kind: 'audio' });
+    const plan = await readAudioEditPlan(settings, project.id);
+
+    await addAudioClipToEditPlan(settings, {
+      projectId: project.id,
+      assetId: asset.id,
+      trackName: plan.tracks[0]!.name,
+      sourceStartMs: 0,
+      sourceEndMs: 1000
+    });
+
+    await expect(deleteAudioTrackInEditPlan(settings, { projectId: project.id, trackId: plan.tracks[0]!.id })).rejects.toThrow(
+      'Cannot delete an audio track that contains clips.'
+    );
+
+    const nextPlan = await deleteAudioTrackInEditPlan(settings, { projectId: project.id, trackId: plan.tracks[1]!.id });
+    expect(nextPlan.tracks.map((track) => track.id)).toEqual([plan.tracks[0]!.id]);
   });
 
   it('lists imported project assets and updates the non-destructive edit plan with ripple delete', async () => {
@@ -207,20 +270,20 @@ describe('workspace local file contract', () => {
     const firstClip = await addAudioClipToEditPlan(settings, {
       projectId: project.id,
       assetId: hostAsset.id,
-      trackName: 'Voice',
+      trackName: '音轨 1',
       sourceStartMs: 0,
       sourceEndMs: 1000
     });
     const secondClip = await addAudioClipToEditPlan(settings, {
       projectId: project.id,
       assetId: guestAsset.id,
-      trackName: 'Voice',
+      trackName: '音轨 1',
       sourceStartMs: 0,
       sourceEndMs: 2000
     });
 
     const plan = await readAudioEditPlan(settings, project.id);
-    expect(plan.tracks).toHaveLength(1);
+    expect(plan.tracks.map((track) => track.name)).toEqual(['音轨 1', '音轨 2']);
     expect(plan.clips.map((clip) => clip.timelineStartMs)).toEqual([0, 1000]);
 
     const nextPlan = await rippleDeleteAudioClip(settings, {
@@ -245,21 +308,21 @@ describe('workspace local file contract', () => {
     const firstClip = await addAudioClipToEditPlan(settings, {
       projectId: project.id,
       assetId: asset.id,
-      trackName: 'Voice',
+      trackName: '音轨 1',
       sourceStartMs: 0,
       sourceEndMs: 1000
     });
     const middleClip = await addAudioClipToEditPlan(settings, {
       projectId: project.id,
       assetId: asset.id,
-      trackName: 'Voice',
+      trackName: '音轨 1',
       sourceStartMs: 1000,
       sourceEndMs: 3000
     });
     const lastClip = await addAudioClipToEditPlan(settings, {
       projectId: project.id,
       assetId: asset.id,
-      trackName: 'Voice',
+      trackName: '音轨 1',
       sourceStartMs: 3000,
       sourceEndMs: 4000
     });
@@ -350,7 +413,7 @@ describe('workspace local file contract', () => {
     await addAudioClipToEditPlan(settings, {
       projectId: project.id,
       assetId: asset.id,
-      trackName: 'Voice',
+      trackName: '音轨 1',
       sourceStartMs: 0,
       sourceEndMs: 1000
     });
@@ -361,6 +424,60 @@ describe('workspace local file contract', () => {
     expect(job.outputPath).toMatch(/^exports\//);
     expect(await readFile(path.join(projectRoot, job.outputPath), 'utf8')).toBe('rendered audio');
     await expectFile(path.join(projectRoot, '.podcast-artist', 'renders', `${job.id}.json`));
+  });
+
+  it('skips clips on muted tracks when exporting an edit plan', async () => {
+    const fakeFfmpegPath = path.join(tempDir, 'fake-ffmpeg.js');
+    const argsPath = path.join(tempDir, 'ffmpeg-args.json');
+    await writeFile(
+      fakeFfmpegPath,
+      [
+        '#!/usr/bin/env node',
+        'import { mkdirSync, writeFileSync } from "node:fs";',
+        'import path from "node:path";',
+        `writeFileSync(${JSON.stringify(argsPath)}, JSON.stringify(process.argv.slice(2)));`,
+        'const output = process.argv.at(-1);',
+        'mkdirSync(path.dirname(output), { recursive: true });',
+        'writeFileSync(output, "rendered audio");'
+      ].join('\n'),
+      'utf8'
+    );
+    await chmod(fakeFfmpegPath, 0o755);
+    const settings = createSettings(tempDir);
+    settings.tools.ffmpeg.path = fakeFfmpegPath;
+    const project = await createProject(settings, { title: 'Muted Export' });
+    const sourcePath = path.join(tempDir, 'host.wav');
+    await writeFile(sourcePath, Buffer.from('host audio data'));
+    const asset = await importLibraryAsset(settings, { projectId: project.id, sourcePath, kind: 'audio' });
+    const plan = await readAudioEditPlan(settings, project.id);
+
+    await updateAudioTrackInEditPlan(settings, {
+      projectId: project.id,
+      trackId: plan.tracks[1]!.id,
+      muted: true
+    });
+    await addAudioClipToEditPlan(settings, {
+      projectId: project.id,
+      assetId: asset.id,
+      trackName: plan.tracks[0]!.name,
+      sourceStartMs: 0,
+      sourceEndMs: 1000
+    });
+    await addAudioClipToEditPlan(settings, {
+      projectId: project.id,
+      assetId: asset.id,
+      trackName: plan.tracks[1]!.name,
+      sourceStartMs: 2500,
+      sourceEndMs: 3500
+    });
+
+    const job = await exportAudioEditPlan(settings, { projectId: project.id });
+
+    expect(job.status).toBe('completed');
+    const ffmpegArgs = JSON.parse(await readFile(argsPath, 'utf8')) as string[];
+    expect(ffmpegArgs.filter((arg) => arg === '-i')).toHaveLength(1);
+    expect(ffmpegArgs).toContain('0.000');
+    expect(ffmpegArgs).not.toContain('2.500');
   });
 
   it('analyzes an audio asset with ffprobe and records readable analysis metadata', async () => {

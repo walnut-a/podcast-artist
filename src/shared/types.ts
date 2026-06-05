@@ -294,6 +294,23 @@ export interface AddAudioClipInput {
   sourceEndMs: number;
 }
 
+export interface CreateAudioTrackInput {
+  projectId: string;
+  name?: string;
+}
+
+export interface UpdateAudioTrackInput {
+  projectId: string;
+  trackId: string;
+  name?: string;
+  muted?: boolean;
+}
+
+export interface DeleteAudioTrackInput {
+  projectId: string;
+  trackId: string;
+}
+
 export interface RippleDeleteAudioClipInput {
   projectId: string;
   clipId: string;

@@ -132,15 +132,15 @@
 - 音频文件分析，写入 analysis cache 和素材 metadata。
 - 音频 proxy WAV 与 peaks JSON 生成。
 - 基础 WaveSurfer 波形预览，已有 peaks 时渲染波形并提供播放控制。
-- Clip 时间码编辑，支持手动输入源起止点、播放头写入起止点、边界微调，并按 ripple 规则调整同轨后续片段。
+- 基础多轨剪辑：edit plan 默认两条音轨，支持新增音轨、素材拖入指定音轨、轨道重命名、轨道静音和删除空音轨。
 - Markdown write intent 应用、文档版本快照和 hash 冲突失败保护。
 - 研究任务账本与任务结果采纳。
 - 项目素材库读取和基础非破坏性音频 edit plan。
 - 基础 ripple delete 和 clip timing 数据更新。
-- 基础 WAV 导出渲染和 render job 记录。
+- 基础 WAV 导出渲染和 render job 记录，导出时跳过静音音轨。
 - FFmpeg、ffprobe、whisper.cpp 依赖状态检测。
 - Provider profiles 明文配置编辑，凭证来源只记录无凭证、环境变量或运行时输入。
-- 单元测试覆盖 slug、原子 JSON 写入、项目文件契约、LibraryAsset 导入、write journal、任务账本、edit plan ripple delete、clip timing 更新、FFmpeg 导出命令/render job、ffprobe 分析、proxy 生成、peaks 生成和播放数据读取。
+- 单元测试覆盖 slug、原子 JSON 写入、项目文件契约、LibraryAsset 导入、write journal、任务账本、edit plan 多轨默认值、轨道更新、空轨删除、静音轨导出过滤、ripple delete、clip timing 更新、FFmpeg 导出命令/render job、ffprobe 分析、proxy 生成、peaks 生成和播放数据读取。
 
 对外入口：
 
@@ -171,7 +171,7 @@
 
 - 当前只是早期原型，README 和仓库分析需要持续区分“已实现能力”和“设计规划”。
 - SQLite 索引层尚未实现，当前本地数据管理主要是明文文件和目录结构。
-- 真实转写、完整可编辑时间线、精确时间码编辑、文本/转写驱动的片段操作和复杂多轨混音还未实现。
+- 真实转写、精确时间码编辑、文本/转写驱动的片段操作和复杂多轨混音还未实现。
 - 设计文档中包含较多未来技术方向，后续实现时需要把“已实现”和“规划中”分开维护。
 - 计划类和规范类目录只是入口，不代表已经确认路线图、规范或协作流程。
 

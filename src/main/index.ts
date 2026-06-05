@@ -6,13 +6,16 @@ import type {
   AppendTaskResultInput,
   AppSettings,
   AudioAssetProcessingInput,
+  CreateAudioTrackInput,
   CreateMarkdownAppendIntentInput,
   CreateProjectInput,
   CreateResearchTaskInput,
+  DeleteAudioTrackInput,
   ExportAudioInput,
   GenerateAudioPeaksInput,
   ProviderProfilesFile,
   RippleDeleteAudioClipInput,
+  UpdateAudioTrackInput,
   UpdateAudioClipTimingInput
 } from '../shared/types';
 import { ensureAppConfig, saveDependencyStatus, saveProviderProfiles, saveSettings } from './services/appConfig';
@@ -22,6 +25,7 @@ import {
   addAudioClipToEditPlan,
   analyzeAudioAsset,
   appendTaskResultToDocument,
+  createAudioTrackInEditPlan,
   createResearchTask,
   createProject,
   ensureWorkspace,
@@ -33,7 +37,10 @@ import {
   readAudioAssetPlaybackData,
   readProjectLibrary,
   readProjectDocument,
+  readProjectTasks,
   rippleDeleteAudioClip,
+  updateAudioTrackInEditPlan,
+  deleteAudioTrackInEditPlan,
   updateAudioClipTiming
 } from './services/workspace';
 
@@ -170,6 +177,11 @@ function registerIpc(): void {
     return createResearchTask(settings, input);
   });
 
+  ipcMain.handle('task:readProjectTasks', async (_event, projectId: string) => {
+    const { settings } = await ensureAppConfig();
+    return readProjectTasks(settings, projectId);
+  });
+
   ipcMain.handle('task:appendResultToDocument', async (_event, input: AppendTaskResultInput) => {
     const { settings } = await ensureAppConfig();
     return appendTaskResultToDocument(settings, input);
@@ -183,6 +195,21 @@ function registerIpc(): void {
   ipcMain.handle('audio:readEditPlan', async (_event, projectId: string) => {
     const { settings } = await ensureAppConfig();
     return readAudioEditPlan(settings, projectId);
+  });
+
+  ipcMain.handle('audio:createTrack', async (_event, input: CreateAudioTrackInput) => {
+    const { settings } = await ensureAppConfig();
+    return createAudioTrackInEditPlan(settings, input);
+  });
+
+  ipcMain.handle('audio:updateTrack', async (_event, input: UpdateAudioTrackInput) => {
+    const { settings } = await ensureAppConfig();
+    return updateAudioTrackInEditPlan(settings, input);
+  });
+
+  ipcMain.handle('audio:deleteTrack', async (_event, input: DeleteAudioTrackInput) => {
+    const { settings } = await ensureAppConfig();
+    return deleteAudioTrackInEditPlan(settings, input);
   });
 
   ipcMain.handle('audio:addClipToEditPlan', async (_event, input: AddAudioClipInput) => {

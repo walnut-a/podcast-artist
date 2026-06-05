@@ -12,9 +12,12 @@ import type {
   AudioPeaks,
   AudioProxy,
   AudioAssetProcessingInput,
+  AudioTrack,
+  CreateAudioTrackInput,
   CreateMarkdownAppendIntentInput,
   CreateProjectInput,
   CreateResearchTaskInput,
+  DeleteAudioTrackInput,
   DependencyStatusFile,
   ExportAudioInput,
   ExportJob,
@@ -25,6 +28,7 @@ import type {
   ProviderProfilesFile,
   ProjectSummary,
   RippleDeleteAudioClipInput,
+  UpdateAudioTrackInput,
   UpdateAudioClipTimingInput
 } from '../../shared/types';
 
@@ -38,6 +42,14 @@ const previewEditPlans = new Map<string, AudioEditPlan>();
 const previewExportJobs = new Map<string, ExportJob[]>();
 const previewAudioProxies = new Map<string, AudioProxy>();
 const previewAudioPeaks = new Map<string, AudioPeaks>();
+
+const localPreviewAudioFileName = '一周年纪念_缩混.wav';
+const localPreviewAudioUrl = `/dev-local/${encodeURIComponent(localPreviewAudioFileName)}`;
+const localPreviewAudioDurationMs = 7174;
+const localPreviewAudioSizeBytes = 2764606;
+const localPreviewAudioBitRate = 3082952;
+const localPreviewAudioSampleRate = 48000;
+const localPreviewAudioChannels = 2;
 
 export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
   async getBootstrapState() {
@@ -149,15 +161,24 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
       projectId,
       scope: 'project' as const,
       kind: 'audio' as const,
-      libraryPath: 'assets/audio/host_take_01.wav',
-      originalPath: 'host_take_01.wav',
-      originalFileName: 'host_take_01.wav',
-      sha256: '0'.repeat(64),
-      sizeBytes: 123456,
+      libraryPath: `assets/audio/${localPreviewAudioFileName}`,
+      originalPath: `dev-local/${localPreviewAudioFileName}`,
+      originalFileName: localPreviewAudioFileName,
+      sha256: 'preview-local-audio'.padEnd(64, '0'),
+      sizeBytes: localPreviewAudioSizeBytes,
       mimeType: 'audio/wav',
       importedAt: now,
       importedBy: 'user' as const,
-      metadata: {}
+      metadata: {
+        audio: {
+          durationMs: localPreviewAudioDurationMs,
+          sampleRate: localPreviewAudioSampleRate,
+          channels: localPreviewAudioChannels,
+          codecName: 'pcm_f32le',
+          bitRate: localPreviewAudioBitRate,
+          analyzedAt: now
+        }
+      }
     };
     const library = previewLibraries.get(projectId) ?? {
       schemaVersion: 'assets.v1',
@@ -247,15 +268,26 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
     previewTasks.set(task.id, task);
     return task;
   },
+  async readProjectTasks(projectId: string) {
+    return Array.from(previewTasks.values())
+      .filter((task) => task.projectId === projectId)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .map(({ resultMarkdown: _resultMarkdown, ...task }) => task);
+  },
   async appendTaskResultToDocument(input: AppendTaskResultInput) {
     const task = previewTasks.get(input.taskId);
     if (!task) throw new Error(`Task not found: ${input.taskId}`);
-    return podcastArtistApi.appendMarkdownToProjectDocument({
+    const result = await podcastArtistApi.appendMarkdownToProjectDocument({
       projectId: input.projectId,
       markdown: `\n${task.resultMarkdown.trimEnd()}\n`,
       summary: input.summary,
       sourceTaskId: task.id
     });
+    previewTasks.set(task.id, {
+      ...task,
+      writeIntentPath: `../../write-journal/applied/${result.intent.id}.json`
+    });
+    return result;
   },
   async readProjectLibrary(projectId: string) {
     return getPreviewLibrary(projectId);
@@ -263,23 +295,68 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
   async readAudioEditPlan(projectId: string) {
     return getPreviewEditPlan(projectId);
   },
+  async createAudioTrack(input: CreateAudioTrackInput) {
+    const plan = getPreviewEditPlan(input.projectId);
+    const trackName = normalizePreviewTrackName(input.name, plan.tracks.length);
+    if (plan.tracks.some((track) => track.name === trackName)) return plan;
+    const nextPlan = {
+      ...plan,
+      tracks: [...plan.tracks, createPreviewTrack(trackName)],
+      updatedAt: new Date().toISOString()
+    } satisfies AudioEditPlan;
+    previewEditPlans.set(input.projectId, nextPlan);
+    return nextPlan;
+  },
+  async updateAudioTrack(input: UpdateAudioTrackInput) {
+    const plan = getPreviewEditPlan(input.projectId);
+    const track = plan.tracks.find((item) => item.id === input.trackId);
+    if (!track) throw new Error(`Audio track not found: ${input.trackId}`);
+    const nextName = input.name === undefined ? track.name : input.name.trim() || track.name;
+    if (nextName !== track.name && plan.tracks.some((item) => item.id !== track.id && item.name === nextName)) {
+      throw new Error(`Audio track name already exists: ${nextName}`);
+    }
+    const nextPlan = {
+      ...plan,
+      tracks: plan.tracks.map((item) =>
+        item.id === track.id
+          ? {
+              ...item,
+              name: nextName,
+              muted: input.muted ?? item.muted
+            }
+          : item
+      ),
+      updatedAt: new Date().toISOString()
+    } satisfies AudioEditPlan;
+    previewEditPlans.set(input.projectId, nextPlan);
+    return nextPlan;
+  },
+  async deleteAudioTrack(input: DeleteAudioTrackInput) {
+    const plan = getPreviewEditPlan(input.projectId);
+    const track = plan.tracks.find((item) => item.id === input.trackId);
+    if (!track) throw new Error(`Audio track not found: ${input.trackId}`);
+    if (plan.clips.some((clip) => clip.trackId === track.id)) {
+      throw new Error('Cannot delete an audio track that contains clips.');
+    }
+    if (plan.tracks.length <= 1) {
+      throw new Error('At least one audio track is required.');
+    }
+    const nextPlan = {
+      ...plan,
+      tracks: plan.tracks.filter((item) => item.id !== track.id),
+      updatedAt: new Date().toISOString()
+    } satisfies AudioEditPlan;
+    previewEditPlans.set(input.projectId, nextPlan);
+    return nextPlan;
+  },
   async addAudioClipToEditPlan(input: AddAudioClipInput) {
     const library = getPreviewLibrary(input.projectId);
     const asset = library.assets.find((item) => item.id === input.assetId);
     if (!asset || asset.kind !== 'audio') throw new Error(`Audio asset not found: ${input.assetId}`);
     const plan = getPreviewEditPlan(input.projectId);
-    const trackName = input.trackName.trim() || 'Voice';
+    const trackName = normalizePreviewTrackName(input.trackName, plan.tracks.length);
     const existingTrack = plan.tracks.find((track) => track.name === trackName);
-    const track =
-      existingTrack ??
-      ({
-        id: `trk_preview_${Date.now()}`,
-        name: trackName,
-        kind: 'voice',
-        muted: false,
-        solo: false,
-        gainDb: 0
-      } satisfies AudioEditPlan['tracks'][number]);
+    const track = existingTrack ?? createPreviewTrack(trackName);
     const timelineStartMs = plan.clips
       .filter((clip) => clip.trackId === track.id)
       .reduce((max, clip) => Math.max(max, clip.timelineStartMs + clip.sourceEndMs - clip.sourceStartMs), 0);
@@ -353,13 +430,15 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
   },
   async exportAudioEditPlan(input: ExportAudioInput) {
     const plan = getPreviewEditPlan(input.projectId);
+    const trackById = new Map(plan.tracks.map((track) => [track.id, track]));
+    const renderableClips = plan.clips.filter((clip) => !trackById.get(clip.trackId)?.muted);
     const now = new Date().toISOString();
     const job: ExportJob = {
       schemaVersion: 'exportJob.v1',
       id: `exp_preview_${Date.now()}`,
       projectId: input.projectId,
       sourcePlanId: plan.id,
-      status: plan.clips.length ? 'completed' : 'failed',
+      status: renderableClips.length ? 'completed' : 'failed',
       settings: {
         format: 'wav',
         sampleRate: plan.exportDefaults.sampleRate,
@@ -369,7 +448,7 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
       outputPath: `exports/preview-${Date.now()}.wav`,
       createdAt: now,
       completedAt: now,
-      error: plan.clips.length ? null : 'No clips in edit plan.'
+      error: renderableClips.length ? null : 'No unmuted clips in edit plan.'
     };
     previewExportJobs.set(input.projectId, [...(previewExportJobs.get(input.projectId) ?? []), job]);
     return job;
@@ -383,11 +462,11 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
       schemaVersion: 'audioAnalysis.v1',
       projectId: input.projectId,
       assetId: input.assetId,
-      durationMs: 8000,
-      sampleRate: 48000,
-      channels: 2,
-      codecName: 'preview',
-      bitRate: 192000,
+      durationMs: localPreviewAudioDurationMs,
+      sampleRate: localPreviewAudioSampleRate,
+      channels: localPreviewAudioChannels,
+      codecName: 'pcm_f32le',
+      bitRate: localPreviewAudioBitRate,
       sourceHash: asset.sha256,
       analyzedAt: now
     };
@@ -440,8 +519,8 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
       projectId: input.projectId,
       assetId: input.assetId,
       pointsPerSecond,
-      durationMs: 8000,
-      peaks: createPreviewPeaks(160),
+      durationMs: localPreviewAudioDurationMs,
+      peaks: createPreviewPeaks(Math.max(1, Math.ceil((localPreviewAudioDurationMs / 1000) * pointsPerSecond))),
       sourceHash: asset.sha256,
       generatedAt: new Date().toISOString()
     } satisfies AudioPeaks;
@@ -453,7 +532,7 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
     if (!asset) throw new Error(`Audio asset not found: ${input.assetId}`);
     const proxy = previewAudioProxies.get(input.assetId);
     const peaks = previewAudioPeaks.get(input.assetId) ?? null;
-    const sourceUrl = createPreviewToneDataUrl();
+    const sourceUrl = asset.originalFileName === localPreviewAudioFileName ? localPreviewAudioUrl : createPreviewToneDataUrl();
     return {
       schemaVersion: 'audioAssetPlayback.v1',
       projectId: input.projectId,
@@ -461,7 +540,7 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
       sourceUrl,
       proxyUrl: proxy ? sourceUrl : null,
       preferredUrl: sourceUrl,
-      durationMs: peaks?.durationMs ?? 8000,
+      durationMs: peaks?.durationMs ?? localPreviewAudioDurationMs,
       peaks,
       sourceHash: asset.sha256,
       loadedAt: new Date().toISOString()
@@ -515,7 +594,7 @@ function createPreviewEditPlan(projectId: string, now: string): AudioEditPlan {
       unit: 'ms',
       sampleRate: 48000
     },
-    tracks: [],
+    tracks: [createPreviewTrack('音轨 1'), createPreviewTrack('音轨 2')],
     clips: [],
     processing: {
       loudnessNormalization: {
@@ -534,6 +613,22 @@ function createPreviewEditPlan(projectId: string, now: string): AudioEditPlan {
     },
     updatedAt: now
   };
+}
+
+function createPreviewTrack(name: string): AudioTrack {
+  return {
+    id: `trk_preview_${crypto.randomUUID()}`,
+    name,
+    kind: 'voice',
+    muted: false,
+    solo: false,
+    gainDb: 0
+  };
+}
+
+function normalizePreviewTrackName(name: string | undefined, existingTrackCount: number): string {
+  const trimmed = name?.trim();
+  return trimmed || `音轨 ${existingTrackCount + 1}`;
 }
 
 function createPreviewPeaks(pointCount: number): number[] {

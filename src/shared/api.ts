@@ -13,8 +13,10 @@ import type {
   AudioProxy,
   AudioAssetProcessingInput,
   CreateMarkdownAppendIntentInput,
+  CreateAudioTrackInput,
   CreateProjectInput,
   CreateResearchTaskInput,
+  DeleteAudioTrackInput,
   DependencyStatusFile,
   ExportAudioInput,
   ExportJob,
@@ -25,6 +27,7 @@ import type {
   ProviderProfilesFile,
   ProjectSummary,
   RippleDeleteAudioClipInput,
+  UpdateAudioTrackInput,
   UpdateAudioClipTimingInput,
   WorkspaceSummary
 } from './types';
@@ -40,9 +43,13 @@ export interface PodcastArtistApi {
   readProjectDocument(projectId: string): Promise<ProjectDocument>;
   appendMarkdownToProjectDocument(input: CreateMarkdownAppendIntentInput): Promise<AppendMarkdownDocumentResult>;
   createResearchTask(input: CreateResearchTaskInput): Promise<AgentTask>;
+  readProjectTasks(projectId: string): Promise<AgentTask[]>;
   appendTaskResultToDocument(input: AppendTaskResultInput): Promise<AppendMarkdownDocumentResult>;
   readProjectLibrary(projectId: string): Promise<LibraryAssetsFile>;
   readAudioEditPlan(projectId: string): Promise<AudioEditPlan>;
+  createAudioTrack(input: CreateAudioTrackInput): Promise<AudioEditPlan>;
+  updateAudioTrack(input: UpdateAudioTrackInput): Promise<AudioEditPlan>;
+  deleteAudioTrack(input: DeleteAudioTrackInput): Promise<AudioEditPlan>;
   addAudioClipToEditPlan(input: AddAudioClipInput): Promise<AudioClip>;
   rippleDeleteAudioClip(input: RippleDeleteAudioClipInput): Promise<AudioEditPlan>;
   updateAudioClipTiming(input: UpdateAudioClipTimingInput): Promise<AudioEditPlan>;

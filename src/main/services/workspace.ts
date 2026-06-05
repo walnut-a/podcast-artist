@@ -19,9 +19,11 @@ import type {
   AudioProxy,
   AudioAssetProcessingInput,
   AudioTrack,
+  CreateAudioTrackInput,
   CreateMarkdownAppendIntentInput,
   CreateProjectInput,
   CreateResearchTaskInput,
+  DeleteAudioTrackInput,
   ExportAudioInput,
   ExportJob,
   FileHash,
@@ -35,6 +37,7 @@ import type {
   ProjectManifest,
   ProjectSummary,
   RippleDeleteAudioClipInput,
+  UpdateAudioTrackInput,
   UpdateAudioClipTimingInput,
   WorkspaceManifest,
   WorkspaceSummary
@@ -377,6 +380,26 @@ export async function createResearchTask(settings: AppSettings, input: CreateRes
   return task;
 }
 
+export async function readProjectTasks(settings: AppSettings, projectId: string): Promise<AgentTask[]> {
+  const projectRecord = await findProjectById(settings, projectId);
+  if (!projectRecord) {
+    throw new Error(`Project not found: ${projectId}`);
+  }
+
+  const tasksRoot = path.join(projectRecord.projectRoot, '.podcast-artist', 'tasks');
+  await ensureDir(tasksRoot);
+  const entries = await readdir(tasksRoot, { withFileTypes: true });
+  const tasks = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .map(async (entry) => readJsonFile<AgentTask>(path.join(tasksRoot, entry.name, 'task.json')))
+  );
+
+  return tasks
+    .filter((task): task is AgentTask => Boolean(task))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
 export async function appendTaskResultToDocument(
   settings: AppSettings,
   input: AppendTaskResultInput
@@ -587,6 +610,92 @@ export async function readAudioEditPlan(settings: AppSettings, projectId: string
   return readAudioEditPlanForProject(projectRecord.projectRoot);
 }
 
+export async function createAudioTrackInEditPlan(settings: AppSettings, input: CreateAudioTrackInput): Promise<AudioEditPlan> {
+  const projectRecord = await findProjectById(settings, input.projectId);
+  if (!projectRecord) {
+    throw new Error(`Project not found: ${input.projectId}`);
+  }
+
+  const plan = await readAudioEditPlanForProject(projectRecord.projectRoot);
+  const trackName = normalizeTrackName(input.name, plan.tracks.length);
+  if (plan.tracks.some((track) => track.name === trackName)) return plan;
+
+  const now = new Date().toISOString();
+  const nextPlan: AudioEditPlan = {
+    ...plan,
+    tracks: [...plan.tracks, createAudioTrack(trackName)],
+    updatedAt: now
+  };
+  await writeAudioEditPlanForProject(projectRecord.projectRoot, nextPlan);
+  await touchProjectManifest(projectRecord.projectRoot, projectRecord.manifest, now);
+  return nextPlan;
+}
+
+export async function updateAudioTrackInEditPlan(settings: AppSettings, input: UpdateAudioTrackInput): Promise<AudioEditPlan> {
+  const projectRecord = await findProjectById(settings, input.projectId);
+  if (!projectRecord) {
+    throw new Error(`Project not found: ${input.projectId}`);
+  }
+
+  const plan = await readAudioEditPlanForProject(projectRecord.projectRoot);
+  const track = plan.tracks.find((item) => item.id === input.trackId);
+  if (!track) {
+    throw new Error(`Audio track not found: ${input.trackId}`);
+  }
+
+  const nextName = input.name === undefined ? track.name : input.name.trim() || track.name;
+  if (nextName !== track.name && plan.tracks.some((item) => item.id !== track.id && item.name === nextName)) {
+    throw new Error(`Audio track name already exists: ${nextName}`);
+  }
+
+  const now = new Date().toISOString();
+  const nextPlan: AudioEditPlan = {
+    ...plan,
+    tracks: plan.tracks.map((item) =>
+      item.id === track.id
+        ? {
+            ...item,
+            name: nextName,
+            muted: input.muted ?? item.muted
+          }
+        : item
+    ),
+    updatedAt: now
+  };
+  await writeAudioEditPlanForProject(projectRecord.projectRoot, nextPlan);
+  await touchProjectManifest(projectRecord.projectRoot, projectRecord.manifest, now);
+  return nextPlan;
+}
+
+export async function deleteAudioTrackInEditPlan(settings: AppSettings, input: DeleteAudioTrackInput): Promise<AudioEditPlan> {
+  const projectRecord = await findProjectById(settings, input.projectId);
+  if (!projectRecord) {
+    throw new Error(`Project not found: ${input.projectId}`);
+  }
+
+  const plan = await readAudioEditPlanForProject(projectRecord.projectRoot);
+  const track = plan.tracks.find((item) => item.id === input.trackId);
+  if (!track) {
+    throw new Error(`Audio track not found: ${input.trackId}`);
+  }
+  if (plan.clips.some((clip) => clip.trackId === track.id)) {
+    throw new Error('Cannot delete an audio track that contains clips.');
+  }
+  if (plan.tracks.length <= 1) {
+    throw new Error('At least one audio track is required.');
+  }
+
+  const now = new Date().toISOString();
+  const nextPlan: AudioEditPlan = {
+    ...plan,
+    tracks: plan.tracks.filter((item) => item.id !== track.id),
+    updatedAt: now
+  };
+  await writeAudioEditPlanForProject(projectRecord.projectRoot, nextPlan);
+  await touchProjectManifest(projectRecord.projectRoot, projectRecord.manifest, now);
+  return nextPlan;
+}
+
 export async function addAudioClipToEditPlan(settings: AppSettings, input: AddAudioClipInput): Promise<AudioClip> {
   const projectRecord = await findProjectById(settings, input.projectId);
   if (!projectRecord) {
@@ -604,7 +713,7 @@ export async function addAudioClipToEditPlan(settings: AppSettings, input: AddAu
   }
 
   const plan = await readAudioEditPlanForProject(projectRecord.projectRoot);
-  const trackName = input.trackName.trim() || 'Voice';
+  const trackName = normalizeTrackName(input.trackName, plan.tracks.length);
   const existingTrack = plan.tracks.find((track) => track.name === trackName);
   const track = existingTrack ?? createAudioTrack(trackName);
   const trackClips = plan.clips.filter((clip) => clip.trackId === track.id);
@@ -803,7 +912,9 @@ export async function exportAudioEditPlan(settings: AppSettings, input: ExportAu
 
     const library = await readProjectLibrary(settings, input.projectId);
     const plan = await readAudioEditPlanForProject(projectRecord.projectRoot);
+    const trackById = new Map(plan.tracks.map((track) => [track.id, track]));
     const renderClips = plan.clips
+      .filter((clip) => !trackById.get(clip.trackId)?.muted)
       .slice()
       .sort((a, b) => a.timelineStartMs - b.timelineStartMs)
       .map((clip) => {
@@ -1337,6 +1448,15 @@ function createAudioTrack(name: string): AudioTrack {
   };
 }
 
+function createDefaultAudioTracks(): AudioTrack[] {
+  return [createAudioTrack('音轨 1'), createAudioTrack('音轨 2')];
+}
+
+function normalizeTrackName(name: string | undefined, existingTrackCount: number): string {
+  const trimmed = name?.trim();
+  return trimmed || `音轨 ${existingTrackCount + 1}`;
+}
+
 function clipDurationMs(clip: Pick<AudioClip, 'sourceStartMs' | 'sourceEndMs'>): number {
   return clip.sourceEndMs - clip.sourceStartMs;
 }
@@ -1356,7 +1476,7 @@ function createEmptyEditPlan(projectId: string, now: string): AudioEditPlan {
       unit: 'ms',
       sampleRate: 48000
     },
-    tracks: [],
+    tracks: createDefaultAudioTracks(),
     clips: [],
     processing: {
       loudnessNormalization: {

@@ -6,9 +6,7 @@ import {
   FileText,
   FolderKanban,
   ListMusic,
-  Pause,
   PenLine,
-  Play,
   Plus,
   RefreshCcw,
   Scissors,
@@ -16,13 +14,15 @@ import {
   Settings,
   Terminal,
   Trash2,
+  Volume2,
+  VolumeX,
   Wrench,
   X
 } from 'lucide-react';
-import type { KeyboardEvent, ReactElement, ReactNode } from 'react';
+import type { DragEvent, KeyboardEvent, ReactElement, ReactNode } from 'react';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import WaveSurfer from 'wavesurfer.js';
 import type {
+  AgentTask,
   AppBootstrapState,
   AppSettings,
   AudioAssetPlaybackData,
@@ -46,6 +46,12 @@ const statusLabels: Record<DependencyCheckResult['status'], string> = {
   partial: '部分可用',
   not_configured: '未配置',
   unavailable: '不可用'
+};
+
+const taskStatusLabels: Record<AgentTask['status'], string> = {
+  running: '运行中',
+  completed: '已完成',
+  failed: '失败'
 };
 
 export function App(): ReactElement {
@@ -819,19 +825,16 @@ function AudioView({
   const currentProject = state.workspace.projects.find((project) => project.id === currentProjectId) ?? null;
   const [library, setLibrary] = useState<LibraryAssetsFile | null>(null);
   const [editPlan, setEditPlan] = useState<AudioEditPlan | null>(null);
-  const [clipDurationMs, setClipDurationMs] = useState('1:00.00');
   const [lastExportJob, setLastExportJob] = useState<ExportJob | null>(null);
-  const [audioNotice, setAudioNotice] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [isAudioBusy, setIsAudioBusy] = useState(false);
   const [selectedAudioAssetId, setSelectedAudioAssetId] = useState<string | null>(null);
+  const [draggedAudioAssetId, setDraggedAudioAssetId] = useState<string | null>(null);
   const [playbackData, setPlaybackData] = useState<AudioAssetPlaybackData | null>(null);
-  const [isPlaybackLoading, setIsPlaybackLoading] = useState(false);
-  const [playheadMs, setPlayheadMs] = useState(0);
 
   const audioAssets = useMemo(() => library?.assets.filter((asset) => asset.kind === 'audio') ?? [], [library]);
   const audioAssetById = useMemo(() => new Map(audioAssets.map((asset) => [asset.id, asset])), [audioAssets]);
-  const trackById = useMemo(() => new Map(editPlan?.tracks.map((track) => [track.id, track]) ?? []), [editPlan]);
+  const timelineTracks = editPlan?.tracks ?? [];
   const clipsByTrackId = useMemo(() => {
     const nextMap = new Map<string, AudioClip[]>();
     editPlan?.tracks.forEach((track) => nextMap.set(track.id, []));
@@ -847,10 +850,6 @@ function AudioView({
       editPlan?.clips.map((clip) => clip.timelineStartMs + Math.max(0, clip.sourceEndMs - clip.sourceStartMs)) ?? [];
     return Math.max(60_000, ...clipEnds);
   }, [editPlan]);
-  const selectedAudioAsset = useMemo(
-    () => audioAssets.find((asset) => asset.id === selectedAudioAssetId) ?? audioAssets[0] ?? null,
-    [audioAssets, selectedAudioAssetId]
-  );
 
   useEffect(() => {
     if (!currentProjectId) {
@@ -858,7 +857,6 @@ function AudioView({
       setEditPlan(null);
       setSelectedAudioAssetId(null);
       setPlaybackData(null);
-      setPlayheadMs(0);
       return;
     }
 
@@ -898,27 +896,21 @@ function AudioView({
   useEffect(() => {
     if (!currentProjectId || !selectedAudioAssetId) {
       setPlaybackData(null);
-      setPlayheadMs(0);
       return;
     }
 
     let isMounted = true;
-    setIsPlaybackLoading(true);
     podcastArtistApi
       .readAudioAssetPlaybackData({ projectId: currentProjectId, assetId: selectedAudioAssetId })
       .then((nextPlaybackData) => {
         if (!isMounted) return;
         setPlaybackData(nextPlaybackData);
-        setPlayheadMs(0);
       })
       .catch((playbackError) => {
         if (!isMounted) return;
         setPlaybackData(null);
         setAudioError(toErrorMessage(playbackError));
       })
-      .finally(() => {
-        if (isMounted) setIsPlaybackLoading(false);
-      });
 
     return () => {
       isMounted = false;
@@ -936,38 +928,27 @@ function AudioView({
 
   async function reloadPlaybackData(assetId: string): Promise<void> {
     if (!currentProjectId) return;
-    setIsPlaybackLoading(true);
-    try {
-      const nextPlaybackData = await podcastArtistApi.readAudioAssetPlaybackData({ projectId: currentProjectId, assetId });
-      setPlaybackData(nextPlaybackData);
-    } finally {
-      setIsPlaybackLoading(false);
-    }
+    const nextPlaybackData = await podcastArtistApi.readAudioAssetPlaybackData({ projectId: currentProjectId, assetId });
+    setPlaybackData(nextPlaybackData);
   }
 
-  async function handleAddClip(assetId: string): Promise<void> {
+  async function handleAddClipToTrack(assetId: string, trackName: string): Promise<void> {
     if (!currentProjectId) return;
-    const durationMs = parseTimeInputMs(clipDurationMs);
-    if (!durationMs || durationMs <= 0) {
-      setAudioError('片段长度需要大于 0，可以输入毫秒或 0:30.00 这样的时间码。');
-      return;
-    }
     const assetDurationMs = getAssetAudioDurationMs(audioAssetById.get(assetId));
-    const sourceEndMs = assetDurationMs ? Math.min(durationMs, assetDurationMs) : durationMs;
+    const sourceEndMs = assetDurationMs ?? 60_000;
 
-    setAudioNotice(null);
     setAudioError(null);
     setIsAudioBusy(true);
     try {
       await podcastArtistApi.addAudioClipToEditPlan({
         projectId: currentProjectId,
         assetId,
-        trackName: 'Voice',
+        trackName,
         sourceStartMs: 0,
         sourceEndMs: Math.round(sourceEndMs)
       });
+      setSelectedAudioAssetId(assetId);
       await reloadAudioState(currentProjectId);
-      setAudioNotice('已加入片段。');
     } catch (clipError) {
       setAudioError(toErrorMessage(clipError));
     } finally {
@@ -975,35 +956,98 @@ function AudioView({
     }
   }
 
-  async function handlePreparePreview(assetId: string): Promise<void> {
+  async function handleCreateAudioTrack(): Promise<void> {
     if (!currentProjectId) return;
-    setSelectedAudioAssetId(assetId);
-    setAudioNotice(null);
     setAudioError(null);
     setIsAudioBusy(true);
     try {
-      await podcastArtistApi.analyzeAudioAsset({ projectId: currentProjectId, assetId });
-      await podcastArtistApi.generateAudioProxy({ projectId: currentProjectId, assetId });
-      await podcastArtistApi.generateAudioPeaks({ projectId: currentProjectId, assetId, pointsPerSecond: 20 });
-      await reloadAudioState(currentProjectId);
-      await reloadPlaybackData(assetId);
-      setAudioNotice('素材已准备好，可以预览和加入剪辑。');
-    } catch (prepareError) {
-      setAudioError(toErrorMessage(prepareError));
+      const plan = await podcastArtistApi.createAudioTrack({
+        projectId: currentProjectId,
+        name: `音轨 ${(editPlan?.tracks.length ?? 0) + 1}`
+      });
+      setEditPlan(plan);
+    } catch (trackError) {
+      setAudioError(toErrorMessage(trackError));
     } finally {
       setIsAudioBusy(false);
     }
   }
 
+  async function handleUpdateAudioTrack(trackId: string, input: { name?: string; muted?: boolean }): Promise<void> {
+    if (!currentProjectId) return;
+    setAudioError(null);
+    setIsAudioBusy(true);
+    try {
+      const plan = await podcastArtistApi.updateAudioTrack({
+        projectId: currentProjectId,
+        trackId,
+        ...input
+      });
+      setEditPlan(plan);
+    } catch (trackError) {
+      setAudioError(toErrorMessage(trackError));
+    } finally {
+      setIsAudioBusy(false);
+    }
+  }
+
+  function handleTrackNameBlur(trackId: string, currentName: string, nextName: string): void {
+    const trimmed = nextName.trim();
+    if (!trimmed || trimmed === currentName) return;
+    void handleUpdateAudioTrack(trackId, { name: trimmed });
+  }
+
+  function handleTrackNameKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
+    if (event.key === 'Enter') {
+      event.currentTarget.blur();
+    }
+    if (event.key === 'Escape') {
+      event.currentTarget.value = event.currentTarget.defaultValue;
+      event.currentTarget.blur();
+    }
+  }
+
+  async function handleDeleteAudioTrack(trackId: string): Promise<void> {
+    if (!currentProjectId) return;
+    setAudioError(null);
+    setIsAudioBusy(true);
+    try {
+      const plan = await podcastArtistApi.deleteAudioTrack({ projectId: currentProjectId, trackId });
+      setEditPlan(plan);
+    } catch (trackError) {
+      setAudioError(toErrorMessage(trackError));
+    } finally {
+      setIsAudioBusy(false);
+    }
+  }
+
+  function handleAssetDragStart(assetId: string, event: DragEvent<HTMLButtonElement>): void {
+    setDraggedAudioAssetId(assetId);
+    event.dataTransfer.effectAllowed = 'copy';
+    event.dataTransfer.setData('text/plain', assetId);
+  }
+
+  function handleTrackDragOver(event: DragEvent<HTMLDivElement>): void {
+    if (!draggedAudioAssetId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  }
+
+  async function handleTrackDrop(trackName: string, event: DragEvent<HTMLDivElement>): Promise<void> {
+    event.preventDefault();
+    const assetId = event.dataTransfer.getData('text/plain') || draggedAudioAssetId;
+    setDraggedAudioAssetId(null);
+    if (!assetId || !audioAssetById.has(assetId)) return;
+    await handleAddClipToTrack(assetId, trackName);
+  }
+
   async function handleRippleDelete(clipId: string): Promise<void> {
     if (!currentProjectId) return;
-    setAudioNotice(null);
     setAudioError(null);
     setIsAudioBusy(true);
     try {
       const plan = await podcastArtistApi.rippleDeleteAudioClip({ projectId: currentProjectId, clipId });
       setEditPlan(plan);
-      setAudioNotice('已删除片段，后续内容自动吸附。');
     } catch (deleteError) {
       setAudioError(toErrorMessage(deleteError));
     } finally {
@@ -1011,42 +1055,15 @@ function AudioView({
     }
   }
 
-  async function handleUpdateClipTiming(clipId: string, sourceStartMs: number, sourceEndMs: number): Promise<void> {
-    if (!currentProjectId) return;
-    if (sourceEndMs <= sourceStartMs) {
-      setAudioError('出点必须晚于入点。');
-      return;
-    }
-
-    setAudioNotice(null);
-    setAudioError(null);
-    setIsAudioBusy(true);
-    try {
-      const plan = await podcastArtistApi.updateAudioClipTiming({
-        projectId: currentProjectId,
-        clipId,
-        sourceStartMs,
-        sourceEndMs
-      });
-      setEditPlan(plan);
-      setAudioNotice('片段时间已更新，后续片段已按波纹规则重新吸附。');
-    } catch (updateError) {
-      setAudioError(toErrorMessage(updateError));
-    } finally {
-      setIsAudioBusy(false);
-    }
-  }
-
   async function handleExportPlan(): Promise<void> {
     if (!currentProjectId) return;
-    setAudioNotice(null);
     setAudioError(null);
     setIsAudioBusy(true);
     try {
       const job = await podcastArtistApi.exportAudioEditPlan({ projectId: currentProjectId });
       setLastExportJob(job);
       if (job.status === 'completed') {
-        setAudioNotice(`导出完成：${job.outputPath}`);
+        return;
       } else {
         setAudioError(job.error ?? '导出失败。');
       }
@@ -1066,32 +1083,26 @@ function AudioView({
     <section className="audio-view">
       {currentProject ? (
         <div className="audio-layout">
-          <div className={`audio-command-bar ${audioAssets.length ? '' : 'no-audio'}`}>
-            <div className="audio-command-copy">
-              <span className="panel-kicker">非破坏剪辑</span>
-              <strong>从素材库选择音频，剪出一版能听的结构，再导出到专业工具精修。</strong>
-            </div>
-            {audioAssets.length ? (
-              <>
-                <label className="field compact-field">
-                  <span>片段长度上限</span>
-                  <input value={clipDurationMs} onChange={(event) => setClipDurationMs(event.target.value)} />
-                </label>
-                <div className="command-actions">
-                  <button
-                    className="primary-button"
-                    type="button"
-                    onClick={() => void handleExportPlan()}
-                    disabled={!currentProject || !editPlan?.clips.length || isAudioBusy}
-                  >
-                    导出 WAV
-                  </button>
-                </div>
-              </>
-            ) : null}
+          <div className="audio-command-bar">
+            <button
+              className="secondary-button small"
+              type="button"
+              onClick={() => void handleCreateAudioTrack()}
+              disabled={!currentProject || isAudioBusy}
+            >
+              <Plus size={15} />
+              添加音轨
+            </button>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => void handleExportPlan()}
+              disabled={!currentProject || !editPlan?.clips.length || isAudioBusy}
+            >
+              导出 WAV
+            </button>
           </div>
 
-          {audioNotice ? <div className="notice success compact">{audioNotice}</div> : null}
           {audioError ? <div className="notice error compact">{audioError}</div> : null}
           {lastExportJob ? (
             <div className={`notice compact ${lastExportJob.status === 'completed' ? 'success' : 'error'}`}>
@@ -1101,139 +1112,119 @@ function AudioView({
 
           {audioAssets.length ? (
             <>
-              <WaveformPlayer
-                asset={selectedAudioAsset}
-                playbackData={playbackData}
-                isBusy={isAudioBusy}
-                isLoading={isPlaybackLoading}
-                onPlayheadChange={setPlayheadMs}
-                onPreparePreview={handlePreparePreview}
-              />
-
-              <div className={`audio-workbench-grid ${editPlan?.clips.length ? 'with-inspector' : 'without-inspector'}`}>
-                <section className="audio-track-sidebar">
-                  <div className="column-heading">
-                    <div>
-                      <span className="panel-kicker">素材库</span>
-                      <h3>本期音频</h3>
-                    </div>
-                    <span className="count-pill">{audioAssets.length}</span>
-                  </div>
-                  <div className="asset-list">
-                    {audioAssets.map((asset) => (
-                      <article className={`asset-row ${asset.id === selectedAudioAsset?.id ? 'selected' : ''}`} key={asset.id}>
-                        <div>
-                          <strong>{asset.originalFileName}</strong>
-                          <span>{formatAssetAudioMetadata(asset.metadata.audio)}</span>
-                        </div>
-                        <div className="asset-actions">
-                          <button className="secondary-button" type="button" onClick={() => setSelectedAudioAssetId(asset.id)} disabled={isAudioBusy}>
-                            预览
-                          </button>
-                          <button className="secondary-button" type="button" onClick={() => void handlePreparePreview(asset.id)} disabled={isAudioBusy}>
-                            准备预览
-                          </button>
-                          <button className="primary-button small" type="button" onClick={() => void handleAddClip(asset.id)} disabled={isAudioBusy}>
-                            加入剪辑
-                          </button>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
+              <div className="audio-timeline-workspace">
+                <section className="audio-asset-tray" aria-label="素材">
+                  {audioAssets.map((asset) => (
+                    <button
+                      className="audio-asset-chip"
+                      draggable
+                      key={asset.id}
+                      type="button"
+                      onClick={() => setSelectedAudioAssetId(asset.id)}
+                      onDragStart={(event) => handleAssetDragStart(asset.id, event)}
+                      onDragEnd={() => setDraggedAudioAssetId(null)}
+                      title={asset.originalFileName}
+                    >
+                      {asset.originalFileName}
+                    </button>
+                  ))}
                 </section>
 
-                <section className="timeline-panel" aria-label="剪辑时间线">
-                  {editPlan?.clips.length ? (
-                    <>
-                      <div className="timeline-ruler" aria-hidden="true">
-                        {Array.from({ length: 7 }, (_, index) => {
-                          const second = (timelineDurationMs / 1000 / 6) * index;
-                          return <span key={index}>{formatTimecode(second)}</span>;
-                        })}
-                      </div>
-                      <div className="timeline-track-area">
-                        {editPlan.tracks.map((track) => {
-                          const clips = clipsByTrackId.get(track.id) ?? [];
-                          return (
-                            <div className="timeline-track-row" key={track.id}>
-                              <div className="timeline-track-label">
-                                <strong>{formatTrackName(track.name)}</strong>
-                                <span>{clips.length} clips</span>
-                              </div>
-                              <div className="timeline-lane">
-                                {clips.map((clip) => {
-                                  const durationMs = Math.max(1, clip.sourceEndMs - clip.sourceStartMs);
-                                  const asset = audioAssetById.get(clip.assetId);
-                                  const left = Math.max(0, (clip.timelineStartMs / timelineDurationMs) * 100);
-                                  const width = Math.min(100 - left, Math.max(7, (durationMs / timelineDurationMs) * 100));
-
-                                  return (
-                                    <button
-                                      className="timeline-clip"
-                                      key={clip.id}
-                                      style={{ left: `${left}%`, width: `${width}%` }}
-                                      type="button"
-                                      onClick={() => onPreviewAssetFromClip(asset?.id)}
-                                      disabled={!asset}
-                                      title={asset?.originalFileName ?? clip.assetId}
-                                    >
-                                      <span>{asset?.originalFileName ?? '素材片段'}</span>
-                                    </button>
-                                  );
-                                })}
-                              </div>
+                <section className="timeline-panel" aria-label="剪辑音轨">
+                  <div className="timeline-ruler" aria-hidden="true">
+                    <span className="timeline-ruler-spacer" />
+                    {Array.from({ length: 7 }, (_, index) => {
+                      const second = (timelineDurationMs / 1000 / 6) * index;
+                      return <span key={index}>{formatTimecode(second)}</span>;
+                    })}
+                  </div>
+                  <div className="timeline-track-area">
+                    {timelineTracks.map((track) => {
+                      const clips = clipsByTrackId.get(track.id) ?? [];
+                      return (
+                        <div className={`timeline-track-row ${track.muted ? 'muted' : ''}`} key={track.id}>
+                          <div className="timeline-track-label">
+                            <input
+                              aria-label={`${track.name} 名称`}
+                              className="timeline-track-name-input"
+                              defaultValue={track.name}
+                              disabled={isAudioBusy}
+                              onBlur={(event) => handleTrackNameBlur(track.id, track.name, event.currentTarget.value)}
+                              onKeyDown={handleTrackNameKeyDown}
+                            />
+                            <div className="timeline-track-actions">
+                              <button
+                                className={`timeline-track-icon-button ${track.muted ? 'active' : ''}`}
+                                type="button"
+                                onClick={() => void handleUpdateAudioTrack(track.id, { muted: !track.muted })}
+                                disabled={isAudioBusy}
+                                title={track.muted ? '取消静音' : '静音'}
+                              >
+                                {track.muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                              </button>
+                              <button
+                                className="timeline-track-icon-button danger"
+                                type="button"
+                                onClick={() => void handleDeleteAudioTrack(track.id)}
+                                disabled={isAudioBusy || clips.length > 0 || timelineTracks.length <= 1}
+                                title={clips.length > 0 ? '先移除音轨里的音频' : '删除音轨'}
+                              >
+                                <Trash2 size={13} />
+                              </button>
                             </div>
-                          );
-                        })}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="timeline-empty-state">
-                      <ListMusic size={30} />
-                      <strong>还没有剪辑片段</strong>
-                      <span>从左侧素材加入剪辑后，这里才会出现轨道时间线。</span>
-                    </div>
-                  )}
-                </section>
+                          </div>
+                          <div
+                            className={`timeline-lane ${draggedAudioAssetId ? 'drop-ready' : ''}`}
+                            onDragOver={handleTrackDragOver}
+                            onDrop={(event) => void handleTrackDrop(track.name, event)}
+                          >
+                            {clips.map((clip) => {
+                              const durationMs = Math.max(1, clip.sourceEndMs - clip.sourceStartMs);
+                              const asset = audioAssetById.get(clip.assetId);
+                              const left = Math.max(0, (clip.timelineStartMs / timelineDurationMs) * 100);
+                              const width = Math.min(100 - left, Math.max(7, (durationMs / timelineDurationMs) * 100));
 
-                {editPlan?.clips.length ? (
-                  <aside className="audio-inspector-panel">
-                    <div className="column-heading">
-                      <div>
-                        <span className="panel-kicker">编辑计划</span>
-                        <h3>片段参数</h3>
-                      </div>
-                    </div>
-                    <div className="plan-summary">
-                      <span>{editPlan.tracks.length} 条轨道</span>
-                      <span>{editPlan.clips.length} 个片段</span>
-                      <span>{editPlan.processing.loudnessNormalization.enabled ? '响度标准化' : '未标准化'}</span>
-                    </div>
-                    <div className="clip-list inspector-clip-list">
-                      {editPlan.clips.map((clip) => (
-                        <ClipTimingCard
-                          key={clip.id}
-                          asset={audioAssetById.get(clip.assetId) ?? null}
-                          clip={clip}
-                          currentPlayheadAssetId={selectedAudioAsset?.id ?? null}
-                          isBusy={isAudioBusy}
-                          playheadMs={playheadMs}
-                          trackName={trackById.get(clip.trackId)?.name ?? clip.trackId}
-                          onPreviewAsset={setSelectedAudioAssetId}
-                          onRippleDelete={handleRippleDelete}
-                          onUpdateTiming={handleUpdateClipTiming}
-                        />
-                      ))}
-                    </div>
-                  </aside>
-                ) : null}
+                              return (
+                                <div className="timeline-clip-group" key={clip.id} style={{ left: `${left}%`, width: `${width}%` }}>
+                                  <button
+                                    className="timeline-clip"
+                                    type="button"
+                                    onClick={() => onPreviewAssetFromClip(asset?.id)}
+                                    disabled={!asset}
+                                    title={asset?.originalFileName ?? clip.assetId}
+                                  >
+                                    <TimelineClipWaveform
+                                      playbackData={playbackData?.assetId === clip.assetId ? playbackData : null}
+                                      sourceEndMs={clip.sourceEndMs}
+                                      sourceStartMs={clip.sourceStartMs}
+                                    />
+                                    <span>{asset?.originalFileName ?? '音频'}</span>
+                                  </button>
+                                  <button
+                                    className="timeline-clip-remove"
+                                    type="button"
+                                    onClick={() => void handleRippleDelete(clip.id)}
+                                    disabled={isAudioBusy}
+                                    title="移除音频"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
               </div>
             </>
           ) : (
             <div className="audio-empty-workflow">
               <Scissors size={30} />
               <strong>还没有可剪辑的音频</strong>
-              <span>剪辑只引用素材库里的音频。先到素材库导入原始音频，再回来加入剪辑。</span>
+              <span>先到素材库导入原始音频，再拖入音轨。</span>
             </div>
           )}
         </div>
@@ -1248,292 +1239,22 @@ function AudioView({
   );
 }
 
-function ClipTimingCard({
-  asset,
-  clip,
-  currentPlayheadAssetId,
-  isBusy,
-  playheadMs,
-  trackName,
-  onPreviewAsset,
-  onRippleDelete,
-  onUpdateTiming
-}: {
-  asset: LibraryAsset | null;
-  clip: AudioClip;
-  currentPlayheadAssetId: string | null;
-  isBusy: boolean;
-  playheadMs: number;
-  trackName: string;
-  onPreviewAsset: (assetId: string) => void;
-  onRippleDelete: (clipId: string) => Promise<void>;
-  onUpdateTiming: (clipId: string, sourceStartMs: number, sourceEndMs: number) => Promise<void>;
-}): ReactElement {
-  const [startDraft, setStartDraft] = useState(String(clip.sourceStartMs));
-  const [endDraft, setEndDraft] = useState(String(clip.sourceEndMs));
-  const canUsePlayhead = Boolean(asset && currentPlayheadAssetId === asset.id);
-  const durationMs = clip.sourceEndMs - clip.sourceStartMs;
-
-  useEffect(() => {
-    setStartDraft(String(clip.sourceStartMs));
-    setEndDraft(String(clip.sourceEndMs));
-  }, [clip.sourceStartMs, clip.sourceEndMs]);
-
-  function applyDraftTiming(): void {
-    const sourceStartMs = parseTimeInputMs(startDraft);
-    const sourceEndMs = parseTimeInputMs(endDraft);
-    if (sourceStartMs === null || sourceEndMs === null) return;
-    void onUpdateTiming(clip.id, sourceStartMs, sourceEndMs);
-  }
-
-  function handleDraftKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      applyDraftTiming();
-    }
-  }
-
-  function updateBoundary(boundary: 'start' | 'end', valueMs: number): void {
-    const nextStartMs = boundary === 'start' ? Math.min(Math.max(0, valueMs), clip.sourceEndMs - 1) : clip.sourceStartMs;
-    const nextEndMs = boundary === 'end' ? Math.max(clip.sourceStartMs + 1, valueMs) : clip.sourceEndMs;
-    void onUpdateTiming(clip.id, nextStartMs, nextEndMs);
-  }
-
-  function nudgeBoundary(boundary: 'start' | 'end', deltaMs: number): void {
-    updateBoundary(boundary, boundary === 'start' ? clip.sourceStartMs + deltaMs : clip.sourceEndMs + deltaMs);
-  }
-
-  return (
-    <article className="clip-row editable-clip-row">
-      <div className="clip-main">
-        <div className="clip-title-line">
-          <div>
-            <strong>{asset?.originalFileName ?? clip.assetId}</strong>
-            <span>
-              {formatTrackName(trackName)} · 开始 {formatTimecode(clip.timelineStartMs / 1000)} · 长度 {formatTimecode(durationMs / 1000)}
-            </span>
-          </div>
-          <button className="icon-button danger-button" type="button" onClick={() => void onRippleDelete(clip.id)} title="波纹删除" disabled={isBusy}>
-            <Trash2 size={16} />
-          </button>
-        </div>
-
-        <div className="clip-time-grid">
-          <label className="field compact-field">
-            <span>入点</span>
-            <input value={startDraft} onChange={(event) => setStartDraft(event.target.value)} onKeyDown={handleDraftKeyDown} />
-          </label>
-          <label className="field compact-field">
-            <span>出点</span>
-            <input value={endDraft} onChange={(event) => setEndDraft(event.target.value)} onKeyDown={handleDraftKeyDown} />
-          </label>
-          <button className="secondary-button apply-time-button" type="button" onClick={applyDraftTiming} disabled={isBusy}>
-            应用修改
-          </button>
-        </div>
-
-        <details className="clip-adjustment">
-          <summary>精调边界</summary>
-          <div className="clip-adjustment-body">
-            <div className="clip-boundary-tools">
-              <div>
-                <span>入点</span>
-                <button className="secondary-button" type="button" onClick={() => nudgeBoundary('start', -1000)} disabled={isBusy}>
-                  -1s
-                </button>
-                <button className="secondary-button" type="button" onClick={() => nudgeBoundary('start', -100)} disabled={isBusy}>
-                  -100ms
-                </button>
-                <button className="secondary-button" type="button" onClick={() => nudgeBoundary('start', 100)} disabled={isBusy}>
-                  +100ms
-                </button>
-                <button className="secondary-button" type="button" onClick={() => nudgeBoundary('start', 1000)} disabled={isBusy}>
-                  +1s
-                </button>
-              </div>
-              <div>
-                <span>出点</span>
-                <button className="secondary-button" type="button" onClick={() => nudgeBoundary('end', -1000)} disabled={isBusy}>
-                  -1s
-                </button>
-                <button className="secondary-button" type="button" onClick={() => nudgeBoundary('end', -100)} disabled={isBusy}>
-                  -100ms
-                </button>
-                <button className="secondary-button" type="button" onClick={() => nudgeBoundary('end', 100)} disabled={isBusy}>
-                  +100ms
-                </button>
-                <button className="secondary-button" type="button" onClick={() => nudgeBoundary('end', 1000)} disabled={isBusy}>
-                  +1s
-                </button>
-              </div>
-            </div>
-
-            <div className="clip-playhead-tools">
-              <span>播放头 {formatTimecode(playheadMs / 1000)}</span>
-              {asset ? (
-                <button className="secondary-button" type="button" onClick={() => onPreviewAsset(asset.id)} disabled={isBusy}>
-                  预览素材
-                </button>
-              ) : null}
-              <button className="secondary-button" type="button" onClick={() => updateBoundary('start', playheadMs)} disabled={!canUsePlayhead || isBusy}>
-                设为入点
-              </button>
-              <button className="secondary-button" type="button" onClick={() => updateBoundary('end', playheadMs)} disabled={!canUsePlayhead || isBusy}>
-                设为出点
-              </button>
-            </div>
-          </div>
-        </details>
-      </div>
-    </article>
-  );
-}
-
-function WaveformPlayer({
-  asset,
+function TimelineClipWaveform({
   playbackData,
-  isBusy,
-  isLoading,
-  onPlayheadChange,
-  onPreparePreview
+  sourceEndMs,
+  sourceStartMs
 }: {
-  asset: LibraryAsset | null;
   playbackData: AudioAssetPlaybackData | null;
-  isBusy: boolean;
-  isLoading: boolean;
-  onPlayheadChange: (playheadMs: number) => void;
-  onPreparePreview: (assetId: string) => Promise<void>;
+  sourceEndMs: number;
+  sourceStartMs: number;
 }): ReactElement {
-  const waveformRef = useRef<HTMLDivElement | null>(null);
-  const wavesurferRef = useRef<WaveSurfer | null>(null);
-  const [isReady, setIsReady] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [waveformError, setWaveformError] = useState<string | null>(null);
-  const canRenderWaveform = Boolean(playbackData?.peaks?.peaks.length && playbackData.durationMs && playbackData.preferredUrl);
-
-  useEffect(() => {
-    setIsReady(false);
-    setIsPlaying(false);
-    setCurrentTime(0);
-    setDuration(playbackData?.durationMs ? playbackData.durationMs / 1000 : 0);
-    setWaveformError(null);
-    onPlayheadChange(0);
-
-    if (!waveformRef.current || !playbackData || !canRenderWaveform) {
-      wavesurferRef.current?.destroy();
-      wavesurferRef.current = null;
-      return;
-    }
-
-    wavesurferRef.current?.destroy();
-    const wavesurfer = WaveSurfer.create({
-      container: waveformRef.current,
-      url: playbackData.preferredUrl,
-      peaks: playbackData.peaks ? [playbackData.peaks.peaks] : undefined,
-      duration: playbackData.durationMs ? playbackData.durationMs / 1000 : undefined,
-      backend: 'MediaElement',
-      height: 136,
-      minPxPerSec: 32,
-      barWidth: 2,
-      barGap: 1,
-      barRadius: 1,
-      cursorColor: '#e4ff9a',
-      cursorWidth: 2,
-      dragToSeek: true,
-      normalize: true,
-      waveColor: '#42624b',
-      progressColor: '#c8f46a'
-    });
-    wavesurferRef.current = wavesurfer;
-
-    wavesurfer.on('ready', (readyDuration) => {
-      setDuration(readyDuration);
-      setIsReady(true);
-    });
-    wavesurfer.on('play', () => setIsPlaying(true));
-    wavesurfer.on('pause', () => setIsPlaying(false));
-    wavesurfer.on('finish', () => setIsPlaying(false));
-    wavesurfer.on('timeupdate', (nextTime) => {
-      setCurrentTime(nextTime);
-      onPlayheadChange(Math.max(0, Math.round(nextTime * 1000)));
-    });
-    wavesurfer.on('error', (error) => {
-      setWaveformError(error.message);
-      setIsReady(false);
-      setIsPlaying(false);
-    });
-
-    return () => {
-      wavesurfer.destroy();
-      if (wavesurferRef.current === wavesurfer) {
-        wavesurferRef.current = null;
-      }
-    };
-  }, [playbackData, canRenderWaveform]);
-
-  function handlePlayPause(): void {
-    void wavesurferRef.current?.playPause();
-  }
-
+  const bars = getTimelineWaveBars(playbackData, sourceStartMs, sourceEndMs, 34);
   return (
-    <section className="waveform-panel">
-      <div className="waveform-header">
-        <div>
-          <span className="panel-kicker">波形预览</span>
-          <h3>{asset ? asset.originalFileName : '选择音频素材'}</h3>
-        </div>
-        <div className="waveform-status">
-          <span>{playbackData?.proxyUrl ? '预览就绪' : '待准备'}</span>
-          <span>{playbackData?.peaks ? '波形就绪' : '波形待准备'}</span>
-          <span>{playbackData?.durationMs ? formatDuration(playbackData.durationMs) : '时长未知'}</span>
-        </div>
-      </div>
-
-      {asset && canRenderWaveform ? (
-        <>
-          <div className="waveform-canvas">
-            <div className="waveform-ruler" aria-hidden="true">
-              {Array.from({ length: 6 }, (_, index) => {
-                const second = duration ? (duration / 5) * index : index * 10;
-                return <span key={index}>{formatTimecode(second)}</span>;
-              })}
-            </div>
-            <div className="waveform-shell" ref={waveformRef} />
-          </div>
-          <div className="waveform-controls">
-            <button className="icon-button waveform-play-button" type="button" onClick={handlePlayPause} disabled={!isReady || isBusy}>
-              {isPlaying ? <Pause size={17} /> : <Play size={17} />}
-            </button>
-            <div className="time-readout">
-              <span>{formatTimecode(currentTime)}</span>
-              <span>{formatTimecode(duration)}</span>
-            </div>
-          </div>
-          {waveformError ? <div className="notice error compact">{waveformError}</div> : null}
-        </>
-      ) : (
-        <div className="waveform-empty">
-          <ListMusic size={28} />
-          <div>
-            <strong>{isLoading ? '正在读取预览数据' : asset ? '先准备预览' : '还没有可预览素材'}</strong>
-            <span>
-              {asset
-                ? '准备后会生成可播放预览和波形，长音频也不用在浏览器里整段解码。'
-                : '导入音频后，这里会显示当前素材的可播放波形。'}
-            </span>
-          </div>
-          {asset ? (
-            <div className="waveform-empty-actions">
-              <button className="primary-button small" type="button" onClick={() => void onPreparePreview(asset.id)} disabled={isBusy || isLoading}>
-                准备预览
-              </button>
-            </div>
-          ) : null}
-        </div>
-      )}
-    </section>
+    <div className="timeline-clip-waveform" aria-hidden="true">
+      {bars.map((barHeight, index) => (
+        <span key={index} style={{ height: `${barHeight}%` }} />
+      ))}
+    </div>
   );
 }
 
@@ -1549,6 +1270,7 @@ function DocumentsView({
   const currentProjectId = selectedProjectId;
   const currentProject = state.workspace.projects.find((project) => project.id === currentProjectId) ?? null;
   const [document, setDocument] = useState<ProjectDocument | null>(null);
+  const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [appendDraft, setAppendDraft] = useState('');
   const [taskPrompt, setTaskPrompt] = useState('核实这段资料，并整理成可插入文稿的 Markdown。');
   const [taskContext, setTaskContext] = useState('');
@@ -1560,16 +1282,18 @@ function DocumentsView({
   useEffect(() => {
     if (!currentProjectId) {
       setDocument(null);
+      setTasks([]);
       return;
     }
 
     let isMounted = true;
     setIsLoadingDocument(true);
     setLocalError(null);
-    podcastArtistApi
-      .readProjectDocument(currentProjectId)
-      .then((nextDocument) => {
-        if (isMounted) setDocument(nextDocument);
+    Promise.all([podcastArtistApi.readProjectDocument(currentProjectId), podcastArtistApi.readProjectTasks(currentProjectId)])
+      .then(([nextDocument, nextTasks]) => {
+        if (!isMounted) return;
+        setDocument(nextDocument);
+        setTasks(nextTasks);
       })
       .catch((readError) => {
         if (isMounted) setLocalError(toErrorMessage(readError));
@@ -1633,6 +1357,7 @@ function DocumentsView({
       });
       setDocument(result.document);
       setTaskResult('');
+      setTasks(await podcastArtistApi.readProjectTasks(currentProjectId));
       await onWorkspaceRefresh();
       setLocalNotice('资料任务已完成，结果已保存到文稿。');
     } catch (taskError) {
@@ -1699,6 +1424,28 @@ function DocumentsView({
             <h2>资料任务</h2>
           </div>
           <ListMusic size={22} />
+        </div>
+        <div className="task-ledger-list" aria-label="资料任务历史">
+          {tasks.length ? (
+            tasks.map((task) => (
+              <article className="task-ledger-row" key={task.id}>
+                <div className="task-ledger-title">
+                  <strong>{task.title}</strong>
+                  <span className={`task-status ${task.status}`}>{taskStatusLabels[task.status]}</span>
+                </div>
+                <p>{task.userPrompt}</p>
+                <div className="task-ledger-meta">
+                  <span>{formatTaskTimestamp(task.createdAt)}</span>
+                  <span>{task.writeIntentPath ? '已采纳到文稿' : '未采纳'}</span>
+                </div>
+              </article>
+            ))
+          ) : (
+            <div className="task-ledger-empty">
+              <strong>暂无资料任务</strong>
+              <span>创建后会在项目文件夹内留下 task.json、context.md 和 result.md。</span>
+            </div>
+          )}
         </div>
         <div className="task-form-grid">
           <label className="field">
@@ -1845,6 +1592,17 @@ function formatDuration(durationMs: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
+function formatTaskTimestamp(isoValue: string): string {
+  const date = new Date(isoValue);
+  if (Number.isNaN(date.getTime())) return '时间未知';
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(date);
+}
+
 function formatTimecode(secondsValue: number): string {
   const totalSeconds = Math.max(0, Math.floor(secondsValue));
   const minutes = Math.floor(totalSeconds / 60);
@@ -1853,26 +1611,34 @@ function formatTimecode(secondsValue: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}.${centiseconds.toString().padStart(2, '0')}`;
 }
 
-function formatTrackName(trackName: string): string {
-  return trackName === 'Voice' ? '人声轨' : trackName;
+function getTimelineWaveBars(
+  playbackData: AudioAssetPlaybackData | null,
+  sourceStartMs: number,
+  sourceEndMs: number,
+  barCount: number
+): number[] {
+  const peaks = playbackData?.peaks;
+  if (!peaks?.peaks.length) return getFallbackTimelineWaveBars(barCount);
+
+  const startIndex = Math.max(0, Math.floor((sourceStartMs / 1000) * peaks.pointsPerSecond));
+  const endIndex = Math.min(peaks.peaks.length, Math.max(startIndex + 1, Math.ceil((sourceEndMs / 1000) * peaks.pointsPerSecond)));
+  const segment = peaks.peaks.slice(startIndex, endIndex).map((peak) => Math.abs(peak));
+  if (!segment.length) return getFallbackTimelineWaveBars(barCount);
+
+  const maxPeak = Math.max(0.05, ...segment);
+  return Array.from({ length: barCount }, (_, index) => {
+    const start = Math.floor((index / barCount) * segment.length);
+    const end = Math.max(start + 1, Math.ceil(((index + 1) / barCount) * segment.length));
+    const windowPeak = Math.max(...segment.slice(start, end));
+    return Math.round(16 + (windowPeak / maxPeak) * 78);
+  });
 }
 
-function parseTimeInputMs(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (!trimmed.includes(':')) {
-    const numericValue = Number(trimmed);
-    return Number.isFinite(numericValue) ? Math.max(0, Math.round(numericValue)) : null;
-  }
-
-  const parts = trimmed.split(':');
-  if (parts.length > 3) return null;
-  const secondsPart = Number(parts.at(-1));
-  const minutesPart = Number(parts.at(-2) ?? '0');
-  const hoursPart = Number(parts.at(-3) ?? '0');
-  if (![secondsPart, minutesPart, hoursPart].every(Number.isFinite)) return null;
-  const totalSeconds = hoursPart * 3600 + minutesPart * 60 + secondsPart;
-  return Math.max(0, Math.round(totalSeconds * 1000));
+function getFallbackTimelineWaveBars(barCount: number): number[] {
+  return Array.from({ length: barCount }, (_, index) => {
+    const shape = Math.abs(Math.sin(index * 0.68)) * 0.72 + Math.abs(Math.cos(index * 0.27)) * 0.28;
+    return Math.round(18 + Math.min(1, shape) * 70);
+  });
 }
 
 function NavButton({
