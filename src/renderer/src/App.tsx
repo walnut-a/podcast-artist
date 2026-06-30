@@ -17,9 +17,11 @@ import {
   Volume2,
   VolumeX,
   Wrench,
-  X
+  X,
+  ZoomIn,
+  ZoomOut
 } from 'lucide-react';
-import type { DragEvent, KeyboardEvent, ReactElement, ReactNode } from 'react';
+import type { CSSProperties, DragEvent, KeyboardEvent, MouseEvent, ReactElement, ReactNode } from 'react';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AgentTask,
@@ -53,6 +55,12 @@ const taskStatusLabels: Record<AgentTask['status'], string> = {
   completed: '已完成',
   failed: '失败'
 };
+
+const minTimelineZoom = 1;
+const maxTimelineZoom = 4;
+const timelineZoomButtonStep = 0.25;
+const timelineZoomSliderStep = 0.05;
+const timelineZoomMotionMs = 180;
 
 export function App(): ReactElement {
   const [state, setState] = useState<AppBootstrapState | null>(null);
@@ -831,6 +839,10 @@ function AudioView({
   const [selectedAudioAssetId, setSelectedAudioAssetId] = useState<string | null>(null);
   const [draggedAudioAssetId, setDraggedAudioAssetId] = useState<string | null>(null);
   const [playbackData, setPlaybackData] = useState<AudioAssetPlaybackData | null>(null);
+  const [timelineZoom, setTimelineZoom] = useState(1);
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const timelinePanelRef = useRef<HTMLElement | null>(null);
+  const timelineZoomAnchorRef = useRef<number | null>(null);
 
   const audioAssets = useMemo(() => library?.assets.filter((asset) => asset.kind === 'audio') ?? [], [library]);
   const audioAssetById = useMemo(() => new Map(audioAssets.map((asset) => [asset.id, asset])), [audioAssets]);
@@ -850,12 +862,66 @@ function AudioView({
       editPlan?.clips.map((clip) => clip.timelineStartMs + Math.max(0, clip.sourceEndMs - clip.sourceStartMs)) ?? [];
     return Math.max(60_000, ...clipEnds);
   }, [editPlan]);
+  const timelineZoomPercent = Math.round(timelineZoom * 100);
+  const timelineTickIntervalMs = useMemo(
+    () => getTimelineTickIntervalMs(timelineZoom, timelineDurationMs),
+    [timelineDurationMs, timelineZoom]
+  );
+  const timelineZoomStyle = useMemo(
+    () =>
+      ({
+        '--timeline-content-width': `${timelineZoom * 100}%`,
+        '--timeline-grid-step': `${(timelineTickIntervalMs / timelineDurationMs) * 100}%`
+      }) as CSSProperties,
+    [timelineDurationMs, timelineTickIntervalMs, timelineZoom]
+  );
+  const timelineRulerTicks = useMemo(() => {
+    const tickCount = Math.floor(timelineDurationMs / timelineTickIntervalMs);
+    return Array.from({ length: tickCount + 1 }, (_, index) => {
+      const timeMs = index * timelineTickIntervalMs;
+      return {
+        label: formatTimecode(timeMs / 1000),
+        left: `${Math.min(100, (timeMs / timelineDurationMs) * 100)}%`,
+        timeMs
+      };
+    });
+  }, [timelineDurationMs, timelineTickIntervalMs]);
+  const selectedClipExists = useMemo(
+    () => Boolean(selectedClipId && editPlan?.clips.some((clip) => clip.id === selectedClipId)),
+    [editPlan, selectedClipId]
+  );
+
+  useEffect(() => {
+    const panel = timelinePanelRef.current;
+    const zoomAnchor = timelineZoomAnchorRef.current;
+    if (!panel || zoomAnchor === null) return;
+
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const startedAt = window.performance.now();
+    let animationFrameId = 0;
+
+    const keepZoomAnchor = (): void => {
+      const targetScrollLeft = Math.max(0, panel.scrollWidth * zoomAnchor - panel.clientWidth / 2);
+      panel.scrollLeft = targetScrollLeft;
+
+      if (!prefersReducedMotion && window.performance.now() - startedAt < timelineZoomMotionMs + 40) {
+        animationFrameId = window.requestAnimationFrame(keepZoomAnchor);
+        return;
+      }
+
+      timelineZoomAnchorRef.current = null;
+    };
+
+    animationFrameId = window.requestAnimationFrame(keepZoomAnchor);
+    return () => window.cancelAnimationFrame(animationFrameId);
+  }, [timelineZoom]);
 
   useEffect(() => {
     if (!currentProjectId) {
       setLibrary(null);
       setEditPlan(null);
       setSelectedAudioAssetId(null);
+      setSelectedClipId(null);
       setPlaybackData(null);
       return;
     }
@@ -880,6 +946,12 @@ function AudioView({
       isMounted = false;
     };
   }, [currentProjectId]);
+
+  useEffect(() => {
+    if (selectedClipId && !selectedClipExists) {
+      setSelectedClipId(null);
+    }
+  }, [selectedClipExists, selectedClipId]);
 
   useEffect(() => {
     if (!audioAssets.length) {
@@ -932,6 +1004,18 @@ function AudioView({
     setPlaybackData(nextPlaybackData);
   }
 
+  function updateTimelineZoom(nextZoom: number, step = timelineZoomSliderStep): void {
+    const steppedZoom = Math.round(nextZoom / step) * step;
+    const boundedZoom = Number(Math.min(maxTimelineZoom, Math.max(minTimelineZoom, steppedZoom)).toFixed(2));
+    if (boundedZoom === timelineZoom) return;
+
+    const panel = timelinePanelRef.current;
+    if (panel) {
+      timelineZoomAnchorRef.current = (panel.scrollLeft + panel.clientWidth / 2) / Math.max(panel.scrollWidth, panel.clientWidth);
+    }
+    setTimelineZoom(boundedZoom);
+  }
+
   async function handleAddClipToTrack(assetId: string, trackName: string): Promise<void> {
     if (!currentProjectId) return;
     const assetDurationMs = getAssetAudioDurationMs(audioAssetById.get(assetId));
@@ -940,7 +1024,7 @@ function AudioView({
     setAudioError(null);
     setIsAudioBusy(true);
     try {
-      await podcastArtistApi.addAudioClipToEditPlan({
+      const clip = await podcastArtistApi.addAudioClipToEditPlan({
         projectId: currentProjectId,
         assetId,
         trackName,
@@ -949,6 +1033,7 @@ function AudioView({
       });
       setSelectedAudioAssetId(assetId);
       await reloadAudioState(currentProjectId);
+      setSelectedClipId(clip.id);
     } catch (clipError) {
       setAudioError(toErrorMessage(clipError));
     } finally {
@@ -1041,12 +1126,31 @@ function AudioView({
     await handleAddClipToTrack(assetId, trackName);
   }
 
+  async function handleTrackLaneClick(trackName: string, event: MouseEvent<HTMLDivElement>): Promise<void> {
+    if (event.target !== event.currentTarget || isAudioBusy || !selectedAudioAssetId) return;
+    await handleAddClipToTrack(selectedAudioAssetId, trackName);
+  }
+
+  function handleTimelineKeyDown(event: KeyboardEvent<HTMLElement>): void {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('input, textarea, [contenteditable="true"]')) return;
+    if (!selectedClipId || isAudioBusy) return;
+
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+      event.preventDefault();
+      void handleRippleDelete(selectedClipId);
+    }
+  }
+
   async function handleRippleDelete(clipId: string): Promise<void> {
     if (!currentProjectId) return;
     setAudioError(null);
     setIsAudioBusy(true);
     try {
       const plan = await podcastArtistApi.rippleDeleteAudioClip({ projectId: currentProjectId, clipId });
+      if (selectedClipId === clipId) {
+        setSelectedClipId(null);
+      }
       setEditPlan(plan);
     } catch (deleteError) {
       setAudioError(toErrorMessage(deleteError));
@@ -1084,23 +1188,55 @@ function AudioView({
       {currentProject ? (
         <div className="audio-layout">
           <div className="audio-command-bar">
-            <button
-              className="secondary-button small"
-              type="button"
-              onClick={() => void handleCreateAudioTrack()}
-              disabled={!currentProject || isAudioBusy}
-            >
-              <Plus size={15} />
-              添加音轨
-            </button>
-            <button
-              className="primary-button"
-              type="button"
-              onClick={() => void handleExportPlan()}
-              disabled={!currentProject || !editPlan?.clips.length || isAudioBusy}
-            >
-              导出 WAV
-            </button>
+            <div className="timeline-zoom-control" aria-label="时间线缩放">
+              <button
+                className="timeline-zoom-button"
+                type="button"
+                onClick={() => updateTimelineZoom(timelineZoom - timelineZoomButtonStep, timelineZoomButtonStep)}
+                disabled={timelineZoom <= minTimelineZoom}
+                title="缩小时间线"
+              >
+                <ZoomOut size={14} />
+              </button>
+              <input
+                aria-label="时间线缩放比例"
+                max={maxTimelineZoom}
+                min={minTimelineZoom}
+                onChange={(event) => updateTimelineZoom(Number(event.currentTarget.value))}
+                step={timelineZoomSliderStep}
+                type="range"
+                value={timelineZoom}
+              />
+              <button
+                className="timeline-zoom-button"
+                type="button"
+                onClick={() => updateTimelineZoom(timelineZoom + timelineZoomButtonStep, timelineZoomButtonStep)}
+                disabled={timelineZoom >= maxTimelineZoom}
+                title="放大时间线"
+              >
+                <ZoomIn size={14} />
+              </button>
+              <span>{timelineZoomPercent}%</span>
+            </div>
+            <div className="audio-command-actions">
+              <button
+                className="secondary-button small"
+                type="button"
+                onClick={() => void handleCreateAudioTrack()}
+                disabled={!currentProject || isAudioBusy}
+              >
+                <Plus size={15} />
+                添加音轨
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => void handleExportPlan()}
+                disabled={!currentProject || !editPlan?.clips.length || isAudioBusy}
+              >
+                导出 WAV
+              </button>
+            </div>
           </div>
 
           {audioError ? <div className="notice error compact">{audioError}</div> : null}
@@ -1116,7 +1252,7 @@ function AudioView({
                 <section className="audio-asset-tray" aria-label="素材">
                   {audioAssets.map((asset) => (
                     <button
-                      className="audio-asset-chip"
+                      className={`audio-asset-chip ${selectedAudioAssetId === asset.id ? 'selected' : ''}`}
                       draggable
                       key={asset.id}
                       type="button"
@@ -1130,92 +1266,116 @@ function AudioView({
                   ))}
                 </section>
 
-                <section className="timeline-panel" aria-label="剪辑音轨">
-                  <div className="timeline-ruler" aria-hidden="true">
-                    <span className="timeline-ruler-spacer" />
-                    {Array.from({ length: 7 }, (_, index) => {
-                      const second = (timelineDurationMs / 1000 / 6) * index;
-                      return <span key={index}>{formatTimecode(second)}</span>;
-                    })}
-                  </div>
-                  <div className="timeline-track-area">
-                    {timelineTracks.map((track) => {
-                      const clips = clipsByTrackId.get(track.id) ?? [];
-                      return (
-                        <div className={`timeline-track-row ${track.muted ? 'muted' : ''}`} key={track.id}>
-                          <div className="timeline-track-label">
-                            <input
-                              aria-label={`${track.name} 名称`}
-                              className="timeline-track-name-input"
-                              defaultValue={track.name}
-                              disabled={isAudioBusy}
-                              onBlur={(event) => handleTrackNameBlur(track.id, track.name, event.currentTarget.value)}
-                              onKeyDown={handleTrackNameKeyDown}
-                            />
-                            <div className="timeline-track-actions">
-                              <button
-                                className={`timeline-track-icon-button ${track.muted ? 'active' : ''}`}
-                                type="button"
-                                onClick={() => void handleUpdateAudioTrack(track.id, { muted: !track.muted })}
+                <section
+                  className="timeline-panel"
+                  aria-label="剪辑音轨"
+                  onKeyDown={handleTimelineKeyDown}
+                  ref={timelinePanelRef}
+                  tabIndex={0}
+                >
+                  <div className="timeline-scroll-content" style={timelineZoomStyle}>
+                    <div className="timeline-ruler" aria-hidden="true">
+                      <span className="timeline-ruler-spacer" />
+                      <div className="timeline-ruler-ticks">
+                        {timelineRulerTicks.map((tick) => (
+                          <span className="timeline-ruler-tick" key={tick.timeMs} style={{ left: tick.left }}>
+                            {tick.label}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="timeline-track-area">
+                      {timelineTracks.map((track) => {
+                        const clips = clipsByTrackId.get(track.id) ?? [];
+                        return (
+                          <div className={`timeline-track-row ${track.muted ? 'muted' : ''}`} key={track.id}>
+                            <div className="timeline-track-label">
+                              <input
+                                aria-label={`${track.name} 名称`}
+                                className="timeline-track-name-input"
+                                defaultValue={track.name}
                                 disabled={isAudioBusy}
-                                title={track.muted ? '取消静音' : '静音'}
-                              >
-                                {track.muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
-                              </button>
-                              <button
-                                className="timeline-track-icon-button danger"
-                                type="button"
-                                onClick={() => void handleDeleteAudioTrack(track.id)}
-                                disabled={isAudioBusy || clips.length > 0 || timelineTracks.length <= 1}
-                                title={clips.length > 0 ? '先移除音轨里的音频' : '删除音轨'}
-                              >
-                                <Trash2 size={13} />
-                              </button>
+                                onBlur={(event) => handleTrackNameBlur(track.id, track.name, event.currentTarget.value)}
+                                onKeyDown={handleTrackNameKeyDown}
+                              />
+                              <div className="timeline-track-actions">
+                                <button
+                                  className={`timeline-track-icon-button ${track.muted ? 'active' : ''}`}
+                                  type="button"
+                                  onClick={() => void handleUpdateAudioTrack(track.id, { muted: !track.muted })}
+                                  disabled={isAudioBusy}
+                                  title={track.muted ? '取消静音' : '静音'}
+                                >
+                                  {track.muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                                </button>
+                                <button
+                                  className="timeline-track-icon-button danger"
+                                  type="button"
+                                  onClick={() => void handleDeleteAudioTrack(track.id)}
+                                  disabled={isAudioBusy || clips.length > 0 || timelineTracks.length <= 1}
+                                  title={clips.length > 0 ? '先移除音轨里的音频' : '删除音轨'}
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            </div>
+                            <div
+                              className={`timeline-lane ${selectedAudioAssetId && !isAudioBusy ? 'can-place' : ''} ${
+                                draggedAudioAssetId ? 'drop-ready' : ''
+                              }`}
+                              onClick={(event) => void handleTrackLaneClick(track.name, event)}
+                              onDragOver={handleTrackDragOver}
+                              onDrop={(event) => void handleTrackDrop(track.name, event)}
+                            >
+                              {clips.map((clip) => {
+                                const durationMs = Math.max(1, clip.sourceEndMs - clip.sourceStartMs);
+                                const asset = audioAssetById.get(clip.assetId);
+                                const left = Math.max(0, (clip.timelineStartMs / timelineDurationMs) * 100);
+                                const width = Math.min(100 - left, Math.max(7, (durationMs / timelineDurationMs) * 100));
+                                const waveformBarCount = Math.min(220, Math.max(36, Math.round((durationMs / 1000) * timelineZoom * 8)));
+
+                                return (
+                                  <div className="timeline-clip-group" key={clip.id} style={{ left: `${left}%`, width: `${width}%` }}>
+                                    <button
+                                      aria-pressed={selectedClipId === clip.id}
+                                      className={`timeline-clip ${selectedClipId === clip.id ? 'selected' : ''}`}
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        setSelectedClipId(clip.id);
+                                        onPreviewAssetFromClip(asset?.id);
+                                      }}
+                                      disabled={!asset}
+                                      title={asset?.originalFileName ?? clip.assetId}
+                                    >
+                                      <TimelineClipWaveform
+                                        barCount={waveformBarCount}
+                                        playbackData={playbackData?.assetId === clip.assetId ? playbackData : null}
+                                        sourceEndMs={clip.sourceEndMs}
+                                        sourceStartMs={clip.sourceStartMs}
+                                      />
+                                      <span className="timeline-clip-label">{asset?.originalFileName ?? '音频'}</span>
+                                    </button>
+                                    <button
+                                      className="timeline-clip-remove"
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        void handleRippleDelete(clip.id);
+                                      }}
+                                      disabled={isAudioBusy}
+                                      title="移除音频"
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
-                          <div
-                            className={`timeline-lane ${draggedAudioAssetId ? 'drop-ready' : ''}`}
-                            onDragOver={handleTrackDragOver}
-                            onDrop={(event) => void handleTrackDrop(track.name, event)}
-                          >
-                            {clips.map((clip) => {
-                              const durationMs = Math.max(1, clip.sourceEndMs - clip.sourceStartMs);
-                              const asset = audioAssetById.get(clip.assetId);
-                              const left = Math.max(0, (clip.timelineStartMs / timelineDurationMs) * 100);
-                              const width = Math.min(100 - left, Math.max(7, (durationMs / timelineDurationMs) * 100));
-
-                              return (
-                                <div className="timeline-clip-group" key={clip.id} style={{ left: `${left}%`, width: `${width}%` }}>
-                                  <button
-                                    className="timeline-clip"
-                                    type="button"
-                                    onClick={() => onPreviewAssetFromClip(asset?.id)}
-                                    disabled={!asset}
-                                    title={asset?.originalFileName ?? clip.assetId}
-                                  >
-                                    <TimelineClipWaveform
-                                      playbackData={playbackData?.assetId === clip.assetId ? playbackData : null}
-                                      sourceEndMs={clip.sourceEndMs}
-                                      sourceStartMs={clip.sourceStartMs}
-                                    />
-                                    <span>{asset?.originalFileName ?? '音频'}</span>
-                                  </button>
-                                  <button
-                                    className="timeline-clip-remove"
-                                    type="button"
-                                    onClick={() => void handleRippleDelete(clip.id)}
-                                    disabled={isAudioBusy}
-                                    title="移除音频"
-                                  >
-                                    <Trash2 size={14} />
-                                  </button>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
                   </div>
                 </section>
               </div>
@@ -1240,15 +1400,17 @@ function AudioView({
 }
 
 function TimelineClipWaveform({
+  barCount,
   playbackData,
   sourceEndMs,
   sourceStartMs
 }: {
+  barCount: number;
   playbackData: AudioAssetPlaybackData | null;
   sourceEndMs: number;
   sourceStartMs: number;
 }): ReactElement {
-  const bars = getTimelineWaveBars(playbackData, sourceStartMs, sourceEndMs, 34);
+  const bars = getTimelineWaveBars(playbackData, sourceStartMs, sourceEndMs, barCount);
   return (
     <div className="timeline-clip-waveform" aria-hidden="true">
       {bars.map((barHeight, index) => (
@@ -1609,6 +1771,29 @@ function formatTimecode(secondsValue: number): string {
   const seconds = totalSeconds % 60;
   const centiseconds = Math.floor((Math.max(0, secondsValue) - totalSeconds) * 100);
   return `${minutes}:${seconds.toString().padStart(2, '0')}.${centiseconds.toString().padStart(2, '0')}`;
+}
+
+function getTimelineTickIntervalMs(zoom: number, durationMs: number): number {
+  const preferredIntervalMs = zoom >= 3.5 ? 2_000 : zoom >= 2.5 ? 2_500 : zoom >= 1.75 ? 5_000 : 10_000;
+  const maxTickCount = zoom >= 3.5 ? 90 : zoom >= 2.5 ? 72 : zoom >= 1.75 ? 48 : 30;
+  const minIntervalForDuration = durationMs / maxTickCount;
+  const niceIntervalsMs = [
+    1_000,
+    2_000,
+    2_500,
+    5_000,
+    10_000,
+    15_000,
+    30_000,
+    60_000,
+    120_000,
+    300_000,
+    600_000,
+    900_000,
+    1_800_000,
+    3_600_000
+  ];
+  return niceIntervalsMs.find((intervalMs) => intervalMs >= preferredIntervalMs && intervalMs >= minIntervalForDuration) ?? 3_600_000;
 }
 
 function getTimelineWaveBars(

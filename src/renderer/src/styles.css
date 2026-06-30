@@ -476,12 +476,13 @@ dd {
   gap: var(--space-2);
   min-height: 40px;
   padding: 0 14px;
-  border-color: color-mix(in oklch, var(--accent), transparent 62%);
-  background: color-mix(in oklch, var(--accent), transparent 86%);
-  color: var(--accent);
+  border-color: color-mix(in oklch, var(--signal), transparent 58%);
+  background: color-mix(in oklch, var(--signal-fill), var(--surface) 22%);
+  color: color-mix(in oklch, var(--signal), white 18%);
   border-radius: 8px;
   font-size: var(--font-small);
   font-weight: 550;
+  outline: none;
   transition:
     background-color 150ms ease,
     border-color 150ms ease,
@@ -494,8 +495,15 @@ dd {
 }
 
 .primary-button:hover:not(:disabled) {
-  border-color: color-mix(in oklch, var(--accent), transparent 46%);
-  background: color-mix(in oklch, var(--accent), transparent 78%);
+  border-color: color-mix(in oklch, var(--signal), transparent 38%);
+  background: color-mix(in oklch, var(--signal-fill), var(--surface) 8%);
+  color: color-mix(in oklch, var(--signal), white 24%);
+}
+
+.primary-button:focus-visible,
+.secondary-button:focus-visible {
+  border-color: color-mix(in oklch, var(--signal), transparent 28%);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--signal-soft), transparent 18%);
 }
 
 .primary-button:disabled {
@@ -514,6 +522,32 @@ dd {
 .secondary-button:hover:not(:disabled) {
   border-color: color-mix(in oklch, var(--signal), transparent 52%);
   background: color-mix(in oklch, var(--signal), transparent 88%);
+}
+
+.modal-actions .primary-button,
+.modal-actions .secondary-button {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 7px;
+  font-size: var(--font-small);
+}
+
+.modal-actions .secondary-button {
+  border-color: color-mix(in oklch, var(--line-strong), transparent 48%);
+  background: color-mix(in oklch, var(--surface-2), var(--bg) 26%);
+  color: var(--muted);
+}
+
+.modal-actions .secondary-button:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--signal), transparent 58%);
+  background: color-mix(in oklch, var(--signal-fill), var(--surface) 46%);
+  color: color-mix(in oklch, var(--signal), var(--text) 26%);
+}
+
+.modal-actions .primary-button {
+  border-color: color-mix(in oklch, var(--signal), transparent 46%);
+  background: color-mix(in oklch, var(--signal-fill), var(--surface) 18%);
+  color: color-mix(in oklch, var(--signal), white 20%);
 }
 
 .row-actions {
@@ -1113,7 +1147,7 @@ dd {
   display: flex;
   min-height: 48px;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: var(--space-2);
   padding: 0 var(--space-4);
   border: 0;
@@ -1125,6 +1159,58 @@ dd {
 .audio-command-bar .secondary-button,
 .audio-command-bar .primary-button {
   margin-top: 0;
+}
+
+.audio-command-actions,
+.timeline-zoom-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.audio-command-actions {
+  justify-content: flex-end;
+}
+
+.timeline-zoom-control {
+  min-width: 260px;
+  color: var(--muted);
+}
+
+.timeline-zoom-control input[type="range"] {
+  width: 140px;
+  accent-color: color-mix(in oklch, var(--signal), transparent 8%);
+}
+
+.timeline-zoom-control span {
+  min-width: 44px;
+  color: var(--muted);
+  font-size: var(--font-caption);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.timeline-zoom-button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: oklch(0.17 0.007 95);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.timeline-zoom-button:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--signal), transparent 52%);
+  color: var(--signal);
+}
+
+.timeline-zoom-button:disabled {
+  cursor: default;
+  opacity: 0.35;
 }
 
 .audio-asset-tray {
@@ -1156,6 +1242,12 @@ dd {
   cursor: grabbing;
 }
 
+.audio-asset-chip.selected {
+  border-color: color-mix(in oklch, var(--signal), transparent 36%);
+  background: color-mix(in oklch, var(--signal-fill), var(--surface) 22%);
+  color: color-mix(in oklch, var(--signal), white 18%);
+}
+
 .audio-asset-chip:focus-visible {
   border-color: color-mix(in oklch, var(--signal), transparent 36%);
 }
@@ -1169,8 +1261,17 @@ dd {
 
 .timeline-panel {
   min-width: 0;
+  overflow-x: auto;
   padding: 0;
   background: oklch(0.12 0.006 95);
+  overscroll-behavior-x: contain;
+}
+
+.timeline-scroll-content {
+  width: var(--timeline-content-width, 100%);
+  min-width: 100%;
+  transition: width 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: width;
 }
 
 .timeline-empty-state,
@@ -1212,7 +1313,7 @@ dd {
 
 .timeline-ruler {
   display: grid;
-  grid-template-columns: 132px repeat(7, minmax(0, 1fr));
+  grid-template-columns: 132px minmax(0, 1fr);
   height: 40px;
   border-bottom: 1px solid var(--line);
   color: var(--muted-2);
@@ -1220,13 +1321,27 @@ dd {
   font-size: 0.6875rem;
 }
 
-.timeline-ruler span {
-  padding: 14px 0 0 var(--space-2);
-  border-left: 1px solid color-mix(in oklch, var(--line-strong), transparent 50%);
+.timeline-ruler .timeline-ruler-spacer {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  border-left: 0;
+  background: oklch(0.12 0.006 95);
 }
 
-.timeline-ruler .timeline-ruler-spacer {
-  border-left: 0;
+.timeline-ruler-ticks {
+  position: relative;
+  min-width: 0;
+}
+
+.timeline-ruler-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  padding: 14px 0 0 var(--space-2);
+  border-left: 1px solid color-mix(in oklch, var(--line-strong), transparent 50%);
+  transition: left 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  white-space: nowrap;
 }
 
 .timeline-track-area {
@@ -1241,6 +1356,9 @@ dd {
 }
 
 .timeline-track-label {
+  position: sticky;
+  left: 0;
+  z-index: 3;
   display: grid;
   align-content: start;
   gap: var(--space-2);
@@ -1309,8 +1427,13 @@ dd {
     linear-gradient(90deg, color-mix(in oklch, var(--line), transparent 48%) 1px, transparent 1px),
     linear-gradient(180deg, transparent 50%, color-mix(in oklch, var(--line), transparent 54%) 51%, transparent 52%);
   background-size:
-    72px 100%,
+    var(--timeline-grid-step, 16.6667%) 100%,
     100% 100%;
+  transition: background-size 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.timeline-lane.can-place {
+  cursor: copy;
 }
 
 .timeline-lane.drop-ready {
@@ -1321,7 +1444,7 @@ dd {
     linear-gradient(180deg, transparent 50%, color-mix(in oklch, var(--line), transparent 54%) 51%, transparent 52%),
     color-mix(in oklch, var(--signal-fill), transparent 60%);
   background-size:
-    72px 100%,
+    var(--timeline-grid-step, 16.6667%) 100%,
     100% 100%,
     100% 100%;
 }
@@ -1331,6 +1454,9 @@ dd {
   top: 24px;
   height: 76px;
   min-width: 54px;
+  transition:
+    left 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .timeline-clip {
@@ -1352,32 +1478,49 @@ dd {
   opacity: 0.72;
 }
 
-.timeline-clip > span {
+.timeline-clip.selected {
+  border-color: color-mix(in oklch, var(--signal), transparent 12%);
+  background: color-mix(in oklch, var(--signal-fill), var(--surface) 6%);
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--signal), transparent 22%),
+    0 10px 22px color-mix(in oklch, black, transparent 70%);
+}
+
+.timeline-clip:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--signal), transparent 18%);
+  outline-offset: 2px;
+}
+
+.timeline-clip-label {
   position: relative;
   z-index: 1;
-  display: block;
-  padding: 8px 32px 0 var(--space-2);
+  display: inline-block;
+  max-width: calc(100% - 36px);
+  margin: 7px 32px 0 var(--space-2);
+  padding: 2px 6px;
   overflow: hidden;
+  border-radius: 4px;
+  background: color-mix(in oklch, var(--signal-fill), var(--surface) 18%);
   color: oklch(0.94 0.008 95);
   font-size: 0.6875rem;
   font-weight: 600;
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .timeline-clip-waveform {
   position: absolute;
-  inset: 22px 10px 10px;
+  inset: 32px 10px 9px;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
   opacity: 0.92;
 }
 
 .timeline-clip-waveform span {
   flex: 1 1 0;
   min-width: 1px;
-  max-width: 4px;
   padding: 0;
   border-radius: 999px;
   background: color-mix(in oklch, var(--signal), white 3%);
@@ -1413,6 +1556,15 @@ dd {
 .timeline-clip-remove:disabled {
   cursor: default;
   opacity: 0.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timeline-scroll-content,
+  .timeline-ruler-tick,
+  .timeline-lane,
+  .timeline-clip-group {
+    transition-duration: 0.01ms;
+  }
 }
 
 @media (max-width: 1180px) {
