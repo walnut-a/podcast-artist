@@ -6,7 +6,9 @@ import {
   FileText,
   FolderKanban,
   ListMusic,
+  Pause,
   PenLine,
+  Play,
   Plus,
   RefreshCcw,
   Scissors,
@@ -39,6 +41,7 @@ import type {
   ProviderProfile,
   ProviderProfilesFile
 } from '../../shared/types';
+import { getActiveTimelineClipPlaybacks } from './audioTimeline';
 import { podcastArtistApi } from './apiClient';
 
 type ViewKey = 'workspace' | 'library' | 'documents' | 'audio' | 'settings';
@@ -61,6 +64,9 @@ const maxTimelineZoom = 4;
 const timelineZoomButtonStep = 0.25;
 const timelineZoomSliderStep = 0.05;
 const timelineZoomMotionMs = 180;
+const clipTrimStepMs = 1_000;
+const clipGapStepMs = 1_000;
+const minClipDurationMs = 250;
 
 export function App(): ReactElement {
   const [state, setState] = useState<AppBootstrapState | null>(null);
@@ -839,10 +845,20 @@ function AudioView({
   const [selectedAudioAssetId, setSelectedAudioAssetId] = useState<string | null>(null);
   const [draggedAudioAssetId, setDraggedAudioAssetId] = useState<string | null>(null);
   const [playbackData, setPlaybackData] = useState<AudioAssetPlaybackData | null>(null);
+  const [playbackDataByAssetId, setPlaybackDataByAssetId] = useState<Map<string, AudioAssetPlaybackData>>(() => new Map());
   const [timelineZoom, setTimelineZoom] = useState(1);
+  const [playheadMs, setPlayheadMs] = useState(0);
+  const [isTimelinePlaying, setIsTimelinePlaying] = useState(false);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const timelinePanelRef = useRef<HTMLElement | null>(null);
   const timelineZoomAnchorRef = useRef<number | null>(null);
+  const editPlanRef = useRef<AudioEditPlan | null>(null);
+  const playbackDataByAssetIdRef = useRef<Map<string, AudioAssetPlaybackData>>(new Map());
+  const timelineContentDurationRef = useRef(0);
+  const timelineAudioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const timelineAnimationFrameRef = useRef<number | null>(null);
+  const timelinePlaybackStartedAtRef = useRef(0);
+  const timelinePlaybackStartMsRef = useRef(0);
 
   const audioAssets = useMemo(() => library?.assets.filter((asset) => asset.kind === 'audio') ?? [], [library]);
   const audioAssetById = useMemo(() => new Map(audioAssets.map((asset) => [asset.id, asset])), [audioAssets]);
@@ -861,6 +877,11 @@ function AudioView({
     const clipEnds =
       editPlan?.clips.map((clip) => clip.timelineStartMs + Math.max(0, clip.sourceEndMs - clip.sourceStartMs)) ?? [];
     return Math.max(60_000, ...clipEnds);
+  }, [editPlan]);
+  const timelineContentDurationMs = useMemo(() => {
+    const clipEnds =
+      editPlan?.clips.map((clip) => clip.timelineStartMs + Math.max(0, clip.sourceEndMs - clip.sourceStartMs)) ?? [];
+    return Math.max(0, ...clipEnds);
   }, [editPlan]);
   const timelineZoomPercent = Math.round(timelineZoom * 100);
   const timelineTickIntervalMs = useMemo(
@@ -886,10 +907,52 @@ function AudioView({
       };
     });
   }, [timelineDurationMs, timelineTickIntervalMs]);
+  const timelinePlayheadStyle = useMemo(
+    () =>
+      ({
+        '--timeline-playhead-ratio': String(timelineDurationMs > 0 ? Math.min(1, Math.max(0, playheadMs / timelineDurationMs)) : 0)
+      }) as CSSProperties,
+    [playheadMs, timelineDurationMs]
+  );
+  const canPlayTimeline = Boolean(editPlan?.clips.length && timelineContentDurationMs > 0);
   const selectedClipExists = useMemo(
     () => Boolean(selectedClipId && editPlan?.clips.some((clip) => clip.id === selectedClipId)),
     [editPlan, selectedClipId]
   );
+  const selectedClip = useMemo(
+    () => (selectedClipId ? editPlan?.clips.find((clip) => clip.id === selectedClipId) ?? null : null),
+    [editPlan, selectedClipId]
+  );
+  const selectedClipAssetDurationMs = selectedClip ? getAssetAudioDurationMs(audioAssetById.get(selectedClip.assetId)) : null;
+  const selectedClipDurationMs = selectedClip ? selectedClip.sourceEndMs - selectedClip.sourceStartMs : 0;
+  const canRestoreClipStart = Boolean(selectedClip && selectedClip.sourceStartMs > 0);
+  const canTrimClipStart = Boolean(selectedClip && selectedClipDurationMs > minClipDurationMs);
+  const canTrimClipEnd = canTrimClipStart;
+  const canRestoreClipEnd = Boolean(
+    selectedClip && selectedClipAssetDurationMs !== null && selectedClip.sourceEndMs < selectedClipAssetDurationMs
+  );
+
+  useEffect(() => {
+    editPlanRef.current = editPlan;
+  }, [editPlan]);
+
+  useEffect(() => {
+    playbackDataByAssetIdRef.current = playbackDataByAssetId;
+  }, [playbackDataByAssetId]);
+
+  useEffect(() => {
+    timelineContentDurationRef.current = timelineContentDurationMs;
+    setPlayheadMs((current) => Math.min(current, timelineContentDurationMs));
+  }, [timelineContentDurationMs]);
+
+  useEffect(() => () => stopTimelinePlayback(false), []);
+
+  useEffect(() => {
+    stopTimelinePlayback();
+    setPlayheadMs(0);
+    setPlaybackDataByAssetId(new Map());
+    playbackDataByAssetIdRef.current = new Map();
+  }, [currentProjectId]);
 
   useEffect(() => {
     const panel = timelinePanelRef.current;
@@ -977,12 +1040,18 @@ function AudioView({
       .then((nextPlaybackData) => {
         if (!isMounted) return;
         setPlaybackData(nextPlaybackData);
+        setPlaybackDataByAssetId((current) => {
+          const nextCache = new Map(current);
+          nextCache.set(nextPlaybackData.assetId, nextPlaybackData);
+          playbackDataByAssetIdRef.current = nextCache;
+          return nextCache;
+        });
       })
       .catch((playbackError) => {
         if (!isMounted) return;
         setPlaybackData(null);
         setAudioError(toErrorMessage(playbackError));
-      })
+      });
 
     return () => {
       isMounted = false;
@@ -1014,6 +1083,153 @@ function AudioView({
       timelineZoomAnchorRef.current = (panel.scrollLeft + panel.clientWidth / 2) / Math.max(panel.scrollWidth, panel.clientWidth);
     }
     setTimelineZoom(boundedZoom);
+  }
+
+  async function ensurePlaybackDataForAssets(assetIds: string[]): Promise<Map<string, AudioAssetPlaybackData>> {
+    if (!currentProjectId) return playbackDataByAssetIdRef.current;
+
+    const uniqueAssetIds = [...new Set(assetIds)].filter(Boolean);
+    const missingAssetIds = uniqueAssetIds.filter((assetId) => !playbackDataByAssetIdRef.current.has(assetId));
+    if (!missingAssetIds.length) return playbackDataByAssetIdRef.current;
+
+    const loadedPlaybackData = await Promise.all(
+      missingAssetIds.map((assetId) => podcastArtistApi.readAudioAssetPlaybackData({ projectId: currentProjectId, assetId }))
+    );
+    const nextCache = new Map(playbackDataByAssetIdRef.current);
+    loadedPlaybackData.forEach((item) => nextCache.set(item.assetId, item));
+    playbackDataByAssetIdRef.current = nextCache;
+    setPlaybackDataByAssetId(nextCache);
+    return nextCache;
+  }
+
+  function getMissingPlaybackAssetIds(assetIds: string[]): string[] {
+    return [...new Set(assetIds)].filter((assetId) => !playbackDataByAssetIdRef.current.has(assetId));
+  }
+
+  function stopTimelinePlayback(updateState = true): void {
+    if (timelineAnimationFrameRef.current !== null) {
+      window.cancelAnimationFrame(timelineAnimationFrameRef.current);
+      timelineAnimationFrameRef.current = null;
+    }
+
+    timelineAudioElementsRef.current.forEach((audio) => {
+      audio.pause();
+      audio.src = '';
+    });
+    timelineAudioElementsRef.current.clear();
+    if (updateState) {
+      setIsTimelinePlaying(false);
+    }
+  }
+
+  function syncTimelineAudioElements(playheadTimeMs: number, cache: Map<string, AudioAssetPlaybackData>): void {
+    const plan = editPlanRef.current;
+    if (!plan) return;
+
+    const activeClipPlaybacks = getActiveTimelineClipPlaybacks({
+      tracks: plan.tracks,
+      clips: plan.clips,
+      playheadMs: playheadTimeMs
+    });
+    const activeClipIds = new Set(activeClipPlaybacks.map((item) => item.clipId));
+
+    timelineAudioElementsRef.current.forEach((audio, clipId) => {
+      if (!activeClipIds.has(clipId)) {
+        audio.pause();
+        audio.src = '';
+        timelineAudioElementsRef.current.delete(clipId);
+      }
+    });
+
+    activeClipPlaybacks.forEach((clipPlayback) => {
+      if (timelineAudioElementsRef.current.has(clipPlayback.clipId)) return;
+
+      const data = cache.get(clipPlayback.assetId);
+      if (!data) return;
+
+      const clip = plan.clips.find((item) => item.id === clipPlayback.clipId);
+      const audio = new Audio(data.preferredUrl);
+      audio.preload = 'auto';
+      audio.currentTime = Math.max(0, clipPlayback.sourceOffsetMs / 1000);
+      audio.volume = Math.min(1, Math.max(0, Math.pow(10, (clip?.gainDb ?? 0) / 20)));
+      timelineAudioElementsRef.current.set(clipPlayback.clipId, audio);
+      audio.play().catch((playError: unknown) => {
+        const errorMessage = toErrorMessage(playError);
+        setAudioError(errorMessage.includes("play() failed") ? '试听音频已准备好，请再点一次播放。' : errorMessage);
+        stopTimelinePlayback();
+      });
+    });
+  }
+
+  function startTimelineAnimation(cache: Map<string, AudioAssetPlaybackData>): void {
+    const tick = (): void => {
+      const nextPlayheadMs =
+        timelinePlaybackStartMsRef.current + (window.performance.now() - timelinePlaybackStartedAtRef.current);
+      const endMs = timelineContentDurationRef.current;
+
+      if (endMs <= 0 || nextPlayheadMs >= endMs) {
+        setPlayheadMs(Math.max(0, endMs));
+        stopTimelinePlayback();
+        return;
+      }
+
+      setPlayheadMs(nextPlayheadMs);
+      syncTimelineAudioElements(nextPlayheadMs, cache);
+      timelineAnimationFrameRef.current = window.requestAnimationFrame(tick);
+    };
+
+    timelineAnimationFrameRef.current = window.requestAnimationFrame(tick);
+  }
+
+  function beginTimelinePlayback(startMs = playheadMs): void {
+    if (!editPlan || !canPlayTimeline) return;
+
+    const trackById = new Map(editPlan.tracks.map((track) => [track.id, track]));
+    const assetIds = editPlan.clips.filter((clip) => !trackById.get(clip.trackId)?.muted).map((clip) => clip.assetId);
+    if (!assetIds.length) return;
+
+    const boundedStartMs = Math.min(Math.max(0, startMs), timelineContentDurationMs);
+    const missingAssetIds = getMissingPlaybackAssetIds(assetIds);
+    setAudioError(null);
+
+    if (missingAssetIds.length) {
+      void ensurePlaybackDataForAssets(missingAssetIds)
+        .then(() => setAudioError('试听音频已准备好，请再点一次播放。'))
+        .catch((playError) => setAudioError(toErrorMessage(playError)));
+      return;
+    }
+
+    const cache = playbackDataByAssetIdRef.current;
+    stopTimelinePlayback();
+    setPlayheadMs(boundedStartMs);
+    timelinePlaybackStartMsRef.current = boundedStartMs;
+    timelinePlaybackStartedAtRef.current = window.performance.now();
+    setIsTimelinePlaying(true);
+    syncTimelineAudioElements(boundedStartMs, cache);
+    startTimelineAnimation(cache);
+  }
+
+  function handleToggleTimelinePlayback(): void {
+    if (isTimelinePlaying) {
+      stopTimelinePlayback();
+      return;
+    }
+
+    beginTimelinePlayback(playheadMs >= timelineContentDurationMs ? 0 : playheadMs);
+  }
+
+  function seekTimeline(nextPlayheadMs: number): void {
+    const boundedPlayheadMs = Math.min(Math.max(0, nextPlayheadMs), timelineContentDurationMs);
+    setPlayheadMs(boundedPlayheadMs);
+    if (isTimelinePlaying) {
+      beginTimelinePlayback(boundedPlayheadMs);
+    }
+  }
+
+  function handleTimelineRulerClick(event: MouseEvent<HTMLDivElement>): void {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const ratio = bounds.width > 0 ? (event.clientX - bounds.left) / bounds.width : 0;
+    seekTimeline(ratio * timelineDurationMs);
   }
 
   async function handleAddClipToTrack(assetId: string, trackName: string): Promise<void> {
@@ -1142,6 +1358,64 @@ function AudioView({
     }
   }
 
+  async function handleAdjustSelectedClip(edge: 'start' | 'end', deltaMs: number): Promise<void> {
+    if (!currentProjectId || !selectedClip) return;
+
+    const assetDurationMs = getAssetAudioDurationMs(audioAssetById.get(selectedClip.assetId));
+    let sourceStartMs = selectedClip.sourceStartMs;
+    let sourceEndMs = selectedClip.sourceEndMs;
+
+    if (edge === 'start') {
+      sourceStartMs = Math.max(0, Math.min(selectedClip.sourceStartMs + deltaMs, sourceEndMs - minClipDurationMs));
+    } else {
+      const maxSourceEndMs = assetDurationMs ?? selectedClip.sourceEndMs;
+      sourceEndMs = Math.min(maxSourceEndMs, Math.max(selectedClip.sourceEndMs + deltaMs, sourceStartMs + minClipDurationMs));
+    }
+
+    if (sourceStartMs === selectedClip.sourceStartMs && sourceEndMs === selectedClip.sourceEndMs) return;
+
+    setAudioError(null);
+    setIsAudioBusy(true);
+    try {
+      const plan = await podcastArtistApi.updateAudioClipTiming({
+        projectId: currentProjectId,
+        clipId: selectedClip.id,
+        sourceStartMs,
+        sourceEndMs
+      });
+      setEditPlan(plan);
+      setSelectedClipId(selectedClip.id);
+    } catch (timingError) {
+      setAudioError(toErrorMessage(timingError));
+    } finally {
+      setIsAudioBusy(false);
+    }
+  }
+
+  async function handleInsertGapNearSelectedClip(position: 'before' | 'after'): Promise<void> {
+    if (!currentProjectId || !selectedClip) return;
+
+    const timelineStartMs =
+      position === 'before' ? selectedClip.timelineStartMs : selectedClip.timelineStartMs + selectedClipDurationMs;
+
+    setAudioError(null);
+    setIsAudioBusy(true);
+    try {
+      const plan = await podcastArtistApi.insertAudioGap({
+        projectId: currentProjectId,
+        trackId: selectedClip.trackId,
+        timelineStartMs,
+        durationMs: clipGapStepMs
+      });
+      setEditPlan(plan);
+      setSelectedClipId(selectedClip.id);
+    } catch (gapError) {
+      setAudioError(toErrorMessage(gapError));
+    } finally {
+      setIsAudioBusy(false);
+    }
+  }
+
   async function handleRippleDelete(clipId: string): Promise<void> {
     if (!currentProjectId) return;
     setAudioError(null);
@@ -1188,37 +1462,107 @@ function AudioView({
       {currentProject ? (
         <div className="audio-layout">
           <div className="audio-command-bar">
-            <div className="timeline-zoom-control" aria-label="时间线缩放">
-              <button
-                className="timeline-zoom-button"
-                type="button"
-                onClick={() => updateTimelineZoom(timelineZoom - timelineZoomButtonStep, timelineZoomButtonStep)}
-                disabled={timelineZoom <= minTimelineZoom}
-                title="缩小时间线"
-              >
-                <ZoomOut size={14} />
-              </button>
-              <input
-                aria-label="时间线缩放比例"
-                max={maxTimelineZoom}
-                min={minTimelineZoom}
-                onChange={(event) => updateTimelineZoom(Number(event.currentTarget.value))}
-                step={timelineZoomSliderStep}
-                type="range"
-                value={timelineZoom}
-              />
-              <button
-                className="timeline-zoom-button"
-                type="button"
-                onClick={() => updateTimelineZoom(timelineZoom + timelineZoomButtonStep, timelineZoomButtonStep)}
-                disabled={timelineZoom >= maxTimelineZoom}
-                title="放大时间线"
-              >
-                <ZoomIn size={14} />
-              </button>
-              <span>{timelineZoomPercent}%</span>
+            <div className="audio-command-left">
+              <div className="timeline-transport" aria-label="时间线播放">
+                <button
+                  className="timeline-transport-button"
+                  type="button"
+                  onClick={handleToggleTimelinePlayback}
+                  disabled={!canPlayTimeline || isAudioBusy}
+                  title={isTimelinePlaying ? '暂停' : '播放'}
+                >
+                  {isTimelinePlaying ? <Pause size={15} /> : <Play size={15} />}
+                </button>
+                <span>{formatTimecode(playheadMs / 1000)}</span>
+                <span className="timeline-transport-separator">/</span>
+                <span>{formatTimecode(timelineContentDurationMs / 1000)}</span>
+              </div>
+
+              <div className="timeline-zoom-control" aria-label="时间线缩放">
+                <button
+                  className="timeline-zoom-button"
+                  type="button"
+                  onClick={() => updateTimelineZoom(timelineZoom - timelineZoomButtonStep, timelineZoomButtonStep)}
+                  disabled={timelineZoom <= minTimelineZoom}
+                  title="缩小时间线"
+                >
+                  <ZoomOut size={14} />
+                </button>
+                <input
+                  aria-label="时间线缩放比例"
+                  max={maxTimelineZoom}
+                  min={minTimelineZoom}
+                  onChange={(event) => updateTimelineZoom(Number(event.currentTarget.value))}
+                  step={timelineZoomSliderStep}
+                  type="range"
+                  value={timelineZoom}
+                />
+                <button
+                  className="timeline-zoom-button"
+                  type="button"
+                  onClick={() => updateTimelineZoom(timelineZoom + timelineZoomButtonStep, timelineZoomButtonStep)}
+                  disabled={timelineZoom >= maxTimelineZoom}
+                  title="放大时间线"
+                >
+                  <ZoomIn size={14} />
+                </button>
+                <span>{timelineZoomPercent}%</span>
+              </div>
             </div>
             <div className="audio-command-actions">
+              {selectedClip ? (
+                <div className="clip-trim-toolbar" aria-label="修剪片段">
+                  <span>{formatDuration(selectedClipDurationMs)}</span>
+                  <button
+                    type="button"
+                    onClick={() => void handleInsertGapNearSelectedClip('before')}
+                    disabled={isAudioBusy}
+                    title="在片段前插入 1 秒空白"
+                  >
+                    前插 1s
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleInsertGapNearSelectedClip('after')}
+                    disabled={isAudioBusy}
+                    title="在片段后插入 1 秒空白"
+                  >
+                    后插 1s
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleAdjustSelectedClip('start', -clipTrimStepMs)}
+                    disabled={isAudioBusy || !canRestoreClipStart}
+                    title="开头向前 1 秒"
+                  >
+                    开头 -1s
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleAdjustSelectedClip('start', clipTrimStepMs)}
+                    disabled={isAudioBusy || !canTrimClipStart}
+                    title="开头向后 1 秒"
+                  >
+                    开头 +1s
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleAdjustSelectedClip('end', -clipTrimStepMs)}
+                    disabled={isAudioBusy || !canTrimClipEnd}
+                    title="结尾向前 1 秒"
+                  >
+                    结尾 -1s
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleAdjustSelectedClip('end', clipTrimStepMs)}
+                    disabled={isAudioBusy || !canRestoreClipEnd}
+                    title="结尾向后 1 秒"
+                  >
+                    结尾 +1s
+                  </button>
+                </div>
+              ) : null}
               <button
                 className="secondary-button small"
                 type="button"
@@ -1274,9 +1618,10 @@ function AudioView({
                   tabIndex={0}
                 >
                   <div className="timeline-scroll-content" style={timelineZoomStyle}>
-                    <div className="timeline-ruler" aria-hidden="true">
+                    <div className="timeline-playhead" style={timelinePlayheadStyle} aria-hidden="true" />
+                    <div className="timeline-ruler" aria-label="时间尺">
                       <span className="timeline-ruler-spacer" />
-                      <div className="timeline-ruler-ticks">
+                      <div className="timeline-ruler-ticks" onClick={handleTimelineRulerClick}>
                         {timelineRulerTicks.map((tick) => (
                           <span className="timeline-ruler-tick" key={tick.timeMs} style={{ left: tick.left }}>
                             {tick.label}

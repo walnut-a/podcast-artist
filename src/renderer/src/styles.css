@@ -1162,14 +1162,98 @@ dd {
 }
 
 .audio-command-actions,
+.audio-command-left,
+.timeline-transport,
 .timeline-zoom-control {
   display: flex;
   align-items: center;
   gap: var(--space-2);
 }
 
+.audio-command-left {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
 .audio-command-actions {
+  flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.timeline-transport {
+  min-width: 178px;
+  color: var(--muted);
+  font-size: var(--font-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline-transport-button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid color-mix(in oklch, var(--signal), transparent 46%);
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--signal-fill), var(--surface) 14%);
+  color: color-mix(in oklch, var(--signal), white 10%);
+  cursor: pointer;
+}
+
+.timeline-transport-button:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--signal), transparent 22%);
+  background: color-mix(in oklch, var(--signal-fill), var(--surface) 4%);
+}
+
+.timeline-transport-button:disabled {
+  cursor: default;
+  opacity: 0.36;
+}
+
+.timeline-transport-separator {
+  color: var(--muted-2);
+}
+
+.clip-trim-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 3px;
+  border: 1px solid color-mix(in oklch, var(--line-strong), transparent 36%);
+  border-radius: 7px;
+  background: color-mix(in oklch, var(--surface), var(--bg) 22%);
+}
+
+.clip-trim-toolbar span {
+  min-width: 42px;
+  padding: 0 7px;
+  color: var(--muted);
+  font-size: var(--font-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.clip-trim-toolbar button {
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: var(--font-caption);
+  font-weight: 560;
+}
+
+.clip-trim-toolbar button:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--signal), transparent 58%);
+  background: color-mix(in oklch, var(--signal-fill), transparent 44%);
+  color: color-mix(in oklch, var(--signal), white 14%);
+}
+
+.clip-trim-toolbar button:disabled {
+  cursor: default;
+  opacity: 0.38;
 }
 
 .timeline-zoom-control {
@@ -1268,10 +1352,45 @@ dd {
 }
 
 .timeline-scroll-content {
+  position: relative;
   width: var(--timeline-content-width, 100%);
   min-width: 100%;
   transition: width 180ms cubic-bezier(0.22, 1, 0.36, 1);
   will-change: width;
+}
+
+.timeline-playhead {
+  position: absolute;
+  top: 40px;
+  bottom: 0;
+  left: calc(132px + ((100% - 132px) * var(--timeline-playhead-ratio, 0)));
+  z-index: 2;
+  width: 1px;
+  pointer-events: none;
+  transition: left 90ms linear;
+}
+
+.timeline-playhead::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: color-mix(in oklch, var(--signal), white 8%);
+  box-shadow: 0 0 12px color-mix(in oklch, var(--signal), transparent 42%);
+  content: "";
+}
+
+.timeline-playhead::after {
+  position: absolute;
+  top: -7px;
+  left: -4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: color-mix(in oklch, var(--signal), white 10%);
+  box-shadow: 0 0 10px color-mix(in oklch, var(--signal), transparent 45%);
+  content: "";
 }
 
 .timeline-empty-state,
@@ -1332,6 +1451,7 @@ dd {
 .timeline-ruler-ticks {
   position: relative;
   min-width: 0;
+  cursor: pointer;
 }
 
 .timeline-ruler-tick {

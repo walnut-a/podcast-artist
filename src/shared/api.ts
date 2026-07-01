@@ -21,6 +21,7 @@ import type {
   ExportAudioInput,
   ExportJob,
   GenerateAudioPeaksInput,
+  InsertAudioGapInput,
   LibraryAsset,
   LibraryAssetsFile,
   ProjectDocument,
@@ -53,6 +54,7 @@ export interface PodcastArtistApi {
   addAudioClipToEditPlan(input: AddAudioClipInput): Promise<AudioClip>;
   rippleDeleteAudioClip(input: RippleDeleteAudioClipInput): Promise<AudioEditPlan>;
   updateAudioClipTiming(input: UpdateAudioClipTimingInput): Promise<AudioEditPlan>;
+  insertAudioGap(input: InsertAudioGapInput): Promise<AudioEditPlan>;
   exportAudioEditPlan(input: ExportAudioInput): Promise<ExportJob>;
   analyzeAudioAsset(input: AudioAssetProcessingInput): Promise<AudioAnalysis>;
   generateAudioProxy(input: AudioAssetProcessingInput): Promise<AudioProxy>;

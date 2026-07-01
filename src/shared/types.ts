@@ -323,6 +323,13 @@ export interface UpdateAudioClipTimingInput {
   sourceEndMs: number;
 }
 
+export interface InsertAudioGapInput {
+  projectId: string;
+  trackId: string;
+  timelineStartMs: number;
+  durationMs: number;
+}
+
 export type ExportJobStatus = 'running' | 'completed' | 'failed';
 
 export interface ExportAudioInput {

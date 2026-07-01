@@ -132,15 +132,15 @@
 - 音频文件分析，写入 analysis cache 和素材 metadata。
 - 音频 proxy WAV 与 peaks JSON 生成。
 - 基础 WaveSurfer 波形预览，已有 peaks 时渲染波形并提供播放控制。
-- 基础多轨剪辑：edit plan 默认两条音轨，支持新增音轨、素材拖入指定音轨、轨道重命名、轨道静音和删除空音轨。
+- 基础多轨剪辑：edit plan 默认两条音轨，支持新增音轨、素材拖入指定音轨、轨道重命名、轨道静音、删除空音轨、时间线缩放、播放头试听、插入空白和按时间线混合导出。
 - Markdown write intent 应用、文档版本快照和 hash 冲突失败保护。
 - 研究任务账本与任务结果采纳。
 - 项目素材库读取和基础非破坏性音频 edit plan。
 - 基础 ripple delete 和 clip timing 数据更新。
-- 基础 WAV 导出渲染和 render job 记录，导出时跳过静音音轨。
+- 基础 WAV 导出渲染和 render job 记录，导出时跳过静音音轨，并按片段时间线起点混合未静音音轨。
 - FFmpeg、ffprobe、whisper.cpp 依赖状态检测。
 - Provider profiles 明文配置编辑，凭证来源只记录无凭证、环境变量或运行时输入。
-- 单元测试覆盖 slug、原子 JSON 写入、项目文件契约、LibraryAsset 导入、write journal、任务账本、edit plan 多轨默认值、轨道更新、空轨删除、静音轨导出过滤、ripple delete、clip timing 更新、FFmpeg 导出命令/render job、ffprobe 分析、proxy 生成、peaks 生成和播放数据读取。
+- 单元测试覆盖 slug、原子 JSON 写入、项目文件契约、LibraryAsset 导入、write journal、任务账本、edit plan 多轨默认值、轨道更新、空轨删除、静音轨导出过滤、ripple delete、clip timing 更新、插入空白、FFmpeg 时间线混音导出/render job、ffprobe 分析、proxy 生成、peaks 生成和播放数据读取。
 
 对外入口：
 

@@ -29,6 +29,7 @@ import type {
   FileHash,
   GenerateAudioPeaksInput,
   ImportLibraryAssetInput,
+  InsertAudioGapInput,
   LibraryAsset,
   LibraryAssetKind,
   LibraryAssetsFile,
@@ -822,10 +823,45 @@ export async function updateAudioClipTiming(
   return nextPlan;
 }
 
+export async function insertAudioGap(settings: AppSettings, input: InsertAudioGapInput): Promise<AudioEditPlan> {
+  const projectRecord = await findProjectById(settings, input.projectId);
+  if (!projectRecord) {
+    throw new Error(`Project not found: ${input.projectId}`);
+  }
+
+  const timelineStartMs = Math.max(0, Math.round(input.timelineStartMs));
+  const durationMs = Math.max(0, Math.round(input.durationMs));
+  if (durationMs <= 0) {
+    throw new Error('Gap durationMs must be greater than 0.');
+  }
+
+  const plan = await readAudioEditPlanForProject(projectRecord.projectRoot);
+  if (!plan.tracks.some((track) => track.id === input.trackId)) {
+    throw new Error(`Track not found: ${input.trackId}`);
+  }
+
+  const nextPlan: AudioEditPlan = {
+    ...plan,
+    clips: plan.clips
+      .map((clip) =>
+        clip.trackId === input.trackId && clip.timelineStartMs >= timelineStartMs
+          ? { ...clip, timelineStartMs: clip.timelineStartMs + durationMs }
+          : clip
+      )
+      .sort(sortClips),
+    updatedAt: new Date().toISOString()
+  };
+
+  await writeAudioEditPlanForProject(projectRecord.projectRoot, nextPlan);
+  await touchProjectManifest(projectRecord.projectRoot, projectRecord.manifest, nextPlan.updatedAt);
+  return nextPlan;
+}
+
 export interface FfmpegRenderClipInput {
   inputPath: string;
   sourceStartMs: number;
   sourceEndMs: number;
+  timelineStartMs: number;
   gainDb: number;
   fadeInMs: number;
   fadeOutMs: number;
@@ -863,14 +899,18 @@ export function buildFfmpegRenderArgs(input: FfmpegRenderArgsInput): string[] {
     if (clip.fadeOutMs > 0) {
       filters.push(`afade=t=out:st=${formatSeconds(Math.max(0, durationMs - clip.fadeOutMs))}:d=${formatSeconds(clip.fadeOutMs)}`);
     }
+    if (clip.timelineStartMs > 0) {
+      filters.push(`adelay=${formatFfmpegDelay(clip.timelineStartMs, input.channels)}`);
+    }
     chains.push(`${filters.join(',')}[a${index}]`);
   }
 
   const loudnorm = `loudnorm=I=${input.loudnessTargetLufs}:TP=-1.5:LRA=11[out]`;
+  const clipLabels = input.clips.map((_, index) => `[a${index}]`);
   const filterTail =
-    input.clips.length === 1
-      ? `[a0]${loudnorm}`
-      : `${input.clips.map((_, index) => `[a${index}]`).join('')}concat=n=${input.clips.length}:v=0:a=1,${loudnorm}`;
+    clipLabels.length === 1
+      ? `${clipLabels[0]}${loudnorm}`
+      : `${clipLabels.join('')}amix=inputs=${clipLabels.length}:duration=longest:normalize=0,${loudnorm}`;
   args.push('-filter_complex', `${chains.join(';')};${filterTail}`, '-map', '[out]', '-ar', String(input.sampleRate), '-ac', String(input.channels), input.outputPath);
   return args;
 }
@@ -916,7 +956,7 @@ export async function exportAudioEditPlan(settings: AppSettings, input: ExportAu
     const renderClips = plan.clips
       .filter((clip) => !trackById.get(clip.trackId)?.muted)
       .slice()
-      .sort((a, b) => a.timelineStartMs - b.timelineStartMs)
+      .sort((a, b) => a.timelineStartMs - b.timelineStartMs || a.trackId.localeCompare(b.trackId))
       .map((clip) => {
         const asset = library.assets.find((item) => item.id === clip.assetId);
         if (!asset) {
@@ -928,6 +968,7 @@ export async function exportAudioEditPlan(settings: AppSettings, input: ExportAu
           inputPath: path.join(assetsRoot, asset.libraryPath),
           sourceStartMs: clip.sourceStartMs,
           sourceEndMs: clip.sourceEndMs,
+          timelineStartMs: clip.timelineStartMs,
           gainDb: clip.gainDb,
           fadeInMs: clip.fadeInMs,
           fadeOutMs: clip.fadeOutMs
@@ -1310,6 +1351,11 @@ function toSafeTimestamp(timestamp: string): string {
 
 function formatSeconds(milliseconds: number): string {
   return (milliseconds / 1000).toFixed(3);
+}
+
+function formatFfmpegDelay(milliseconds: number, channels: number): string {
+  const delayMs = String(Math.max(0, Math.round(milliseconds)));
+  return Array.from({ length: Math.max(1, channels) }, () => delayMs).join('|');
 }
 
 async function resolveFfmpegExecutable(settings: AppSettings): Promise<string | null> {

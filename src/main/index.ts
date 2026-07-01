@@ -13,6 +13,7 @@ import type {
   DeleteAudioTrackInput,
   ExportAudioInput,
   GenerateAudioPeaksInput,
+  InsertAudioGapInput,
   ProviderProfilesFile,
   RippleDeleteAudioClipInput,
   UpdateAudioTrackInput,
@@ -33,6 +34,7 @@ import {
   generateAudioPeaks,
   generateAudioProxy,
   importLibraryAsset,
+  insertAudioGap,
   readAudioEditPlan,
   readAudioAssetPlaybackData,
   readProjectLibrary,
@@ -225,6 +227,11 @@ function registerIpc(): void {
   ipcMain.handle('audio:updateClipTiming', async (_event, input: UpdateAudioClipTimingInput) => {
     const { settings } = await ensureAppConfig();
     return updateAudioClipTiming(settings, input);
+  });
+
+  ipcMain.handle('audio:insertGap', async (_event, input: InsertAudioGapInput) => {
+    const { settings } = await ensureAppConfig();
+    return insertAudioGap(settings, input);
   });
 
   ipcMain.handle('audio:exportEditPlan', async (_event, input: ExportAudioInput) => {

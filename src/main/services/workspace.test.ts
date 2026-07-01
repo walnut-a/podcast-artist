@@ -19,6 +19,7 @@ import {
   generateAudioPeaks,
   generateAudioProxy,
   importLibraryAsset,
+  insertAudioGap,
   readAudioAssetPlaybackData,
   readAudioEditPlan,
   readProjectLibrary,
@@ -343,13 +344,59 @@ describe('workspace local file contract', () => {
     expect(nextPlan.clips.find((clip) => clip.id === lastClip.id)?.timelineStartMs).toBe(2300);
   });
 
-  it('builds ffmpeg render arguments from sequential edit plan clips', () => {
+  it('inserts an explicit timeline gap on the selected track only', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: 'Insert gap' });
+    const sourcePath = path.join(tempDir, 'gap.wav');
+    await writeFile(sourcePath, Buffer.from('gap audio data'));
+    const asset = await importLibraryAsset(settings, { projectId: project.id, sourcePath, kind: 'audio' });
+
+    const firstClip = await addAudioClipToEditPlan(settings, {
+      projectId: project.id,
+      assetId: asset.id,
+      trackName: '音轨 1',
+      sourceStartMs: 0,
+      sourceEndMs: 1000
+    });
+    const secondClip = await addAudioClipToEditPlan(settings, {
+      projectId: project.id,
+      assetId: asset.id,
+      trackName: '音轨 1',
+      sourceStartMs: 1000,
+      sourceEndMs: 2000
+    });
+    const otherTrackClip = await addAudioClipToEditPlan(settings, {
+      projectId: project.id,
+      assetId: asset.id,
+      trackName: '音轨 2',
+      sourceStartMs: 2000,
+      sourceEndMs: 3000
+    });
+
+    const nextPlan = await insertAudioGap(settings, {
+      projectId: project.id,
+      trackId: firstClip.trackId,
+      timelineStartMs: 1000,
+      durationMs: 1500
+    });
+
+    expect(nextPlan.clips.find((clip) => clip.id === firstClip.id)?.timelineStartMs).toBe(0);
+    expect(nextPlan.clips.find((clip) => clip.id === secondClip.id)).toMatchObject({
+      sourceStartMs: 1000,
+      sourceEndMs: 2000,
+      timelineStartMs: 2500
+    });
+    expect(nextPlan.clips.find((clip) => clip.id === otherTrackClip.id)?.timelineStartMs).toBe(0);
+  });
+
+  it('builds ffmpeg render arguments from timeline clips', () => {
     const args = buildFfmpegRenderArgs({
       clips: [
         {
           inputPath: '/tmp/host.wav',
           sourceStartMs: 0,
           sourceEndMs: 1000,
+          timelineStartMs: 0,
           gainDb: 0,
           fadeInMs: 20,
           fadeOutMs: 20
@@ -358,6 +405,7 @@ describe('workspace local file contract', () => {
           inputPath: '/tmp/guest.wav',
           sourceStartMs: 250,
           sourceEndMs: 2250,
+          timelineStartMs: 1000,
           gainDb: -3,
           fadeInMs: 10,
           fadeOutMs: 30
@@ -384,7 +432,7 @@ describe('workspace local file contract', () => {
       '-i',
       '/tmp/guest.wav',
       '-filter_complex',
-      '[0:a]asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.020,afade=t=out:st=0.980:d=0.020[a0];[1:a]asetpts=PTS-STARTPTS,volume=-3dB,afade=t=in:st=0:d=0.010,afade=t=out:st=1.970:d=0.030[a1];[a0][a1]concat=n=2:v=0:a=1,loudnorm=I=-16:TP=-1.5:LRA=11[out]',
+      '[0:a]asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.020,afade=t=out:st=0.980:d=0.020[a0];[1:a]asetpts=PTS-STARTPTS,volume=-3dB,afade=t=in:st=0:d=0.010,afade=t=out:st=1.970:d=0.030,adelay=1000|1000[a1];[a0][a1]amix=inputs=2:duration=longest:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11[out]',
       '-map',
       '[out]',
       '-ar',
@@ -393,6 +441,72 @@ describe('workspace local file contract', () => {
       '2',
       '/tmp/master.wav'
     ]);
+  });
+
+  it('builds ffmpeg render arguments with explicit timeline silence', () => {
+    const args = buildFfmpegRenderArgs({
+      clips: [
+        {
+          inputPath: '/tmp/host.wav',
+          sourceStartMs: 0,
+          sourceEndMs: 1000,
+          timelineStartMs: 0,
+          gainDb: 0,
+          fadeInMs: 0,
+          fadeOutMs: 0
+        },
+        {
+          inputPath: '/tmp/guest.wav',
+          sourceStartMs: 0,
+          sourceEndMs: 1000,
+          timelineStartMs: 2500,
+          gainDb: 0,
+          fadeInMs: 0,
+          fadeOutMs: 0
+        }
+      ],
+      sampleRate: 48000,
+      channels: 2,
+      loudnessTargetLufs: -16,
+      outputPath: '/tmp/master.wav'
+    });
+
+    expect(args).toContain(
+      '[0:a]asetpts=PTS-STARTPTS[a0];[1:a]asetpts=PTS-STARTPTS,adelay=2500|2500[a1];[a0][a1]amix=inputs=2:duration=longest:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11[out]'
+    );
+  });
+
+  it('builds ffmpeg render arguments that mix clips starting at the same time', () => {
+    const args = buildFfmpegRenderArgs({
+      clips: [
+        {
+          inputPath: '/tmp/host.wav',
+          sourceStartMs: 0,
+          sourceEndMs: 1000,
+          timelineStartMs: 0,
+          gainDb: 0,
+          fadeInMs: 0,
+          fadeOutMs: 0
+        },
+        {
+          inputPath: '/tmp/guest.wav',
+          sourceStartMs: 0,
+          sourceEndMs: 1000,
+          timelineStartMs: 0,
+          gainDb: 0,
+          fadeInMs: 0,
+          fadeOutMs: 0
+        }
+      ],
+      sampleRate: 48000,
+      channels: 2,
+      loudnessTargetLufs: -16,
+      outputPath: '/tmp/master.wav'
+    });
+
+    expect(args).toContain(
+      '[0:a]asetpts=PTS-STARTPTS[a0];[1:a]asetpts=PTS-STARTPTS[a1];[a0][a1]amix=inputs=2:duration=longest:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11[out]'
+    );
   });
 
   it('exports an edit plan through ffmpeg and records a render job', async () => {

@@ -22,6 +22,7 @@ import type {
   ExportAudioInput,
   ExportJob,
   GenerateAudioPeaksInput,
+  InsertAudioGapInput,
   LibraryAsset,
   LibraryAssetsFile,
   ProjectDocument,
@@ -422,6 +423,32 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
           }
           return clip;
         })
+        .sort((a, b) => (a.trackId === b.trackId ? a.timelineStartMs - b.timelineStartMs : a.trackId.localeCompare(b.trackId))),
+      updatedAt: new Date().toISOString()
+    };
+    previewEditPlans.set(input.projectId, nextPlan);
+    return nextPlan;
+  },
+  async insertAudioGap(input: InsertAudioGapInput) {
+    const timelineStartMs = Math.max(0, Math.round(input.timelineStartMs));
+    const durationMs = Math.max(0, Math.round(input.durationMs));
+    if (durationMs <= 0) {
+      throw new Error('Gap durationMs must be greater than 0.');
+    }
+
+    const plan = getPreviewEditPlan(input.projectId);
+    if (!plan.tracks.some((track) => track.id === input.trackId)) {
+      throw new Error(`Track not found: ${input.trackId}`);
+    }
+
+    const nextPlan = {
+      ...plan,
+      clips: plan.clips
+        .map((clip) =>
+          clip.trackId === input.trackId && clip.timelineStartMs >= timelineStartMs
+            ? { ...clip, timelineStartMs: clip.timelineStartMs + durationMs }
+            : clip
+        )
         .sort((a, b) => (a.trackId === b.trackId ? a.timelineStartMs - b.timelineStartMs : a.trackId.localeCompare(b.trackId))),
       updatedAt: new Date().toISOString()
     };
