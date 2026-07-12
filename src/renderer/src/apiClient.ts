@@ -250,7 +250,7 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
       id: `tsk_preview_${Date.now()}`,
       projectId: input.projectId,
       documentId: 'doc_episode',
-      segmentId: input.segmentId ?? null,
+      segmentId: null,
       type: 'research',
       title: input.title,
       status: 'running',

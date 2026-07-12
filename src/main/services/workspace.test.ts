@@ -6,6 +6,7 @@ import type { AppSettings } from '../../shared/types';
 import {
   addAudioClipToEditPlan,
   analyzeAudioAsset,
+  appendMarkdownToProjectDocument,
   appendTaskResultToDocument,
   applyPendingWriteIntents,
   buildFfmpegRenderArgs,
@@ -17,6 +18,7 @@ import {
   deleteAudioTrackInEditPlan,
   ensureWorkspace,
   exportAudioEditPlan,
+  failResearchTask,
   generateAudioPeaks,
   generateAudioProxy,
   importLibraryAsset,
@@ -193,6 +195,178 @@ describe('workspace local file contract', () => {
     const appendResult = await appendTaskResultToDocument(settings, { projectId: project.id, taskId: task.id, summary: '采纳资料任务结果' });
     expect(appendResult.document.content).toContain('本地优先可以降低长期维护成本');
     await expect(appendTaskResultToDocument(settings, { projectId: project.id, taskId: task.id, summary: '重复采纳' })).rejects.toThrow('already');
+  });
+
+  it('rejects reading results from a running research task', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: '资料任务结果状态' });
+    const runningTask = await createResearchTask(settings, {
+      projectId: project.id,
+      userPrompt: '仍在运行的任务',
+      contextMarkdown: '上下文',
+      title: '运行中任务'
+    }, 'chat');
+
+    await expect(
+      readResearchTaskResult(settings, { projectId: project.id, taskId: runningTask.id })
+    ).rejects.toThrow('completed');
+  });
+
+  it('rejects reading results from a failed research task', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: '资料任务失败结果' });
+    const failedTask = await createResearchTask(settings, {
+      projectId: project.id,
+      userPrompt: '将会失败的任务',
+      contextMarkdown: '上下文',
+      title: '失败任务'
+    }, 'chat');
+    await failResearchTask(settings, {
+      projectId: project.id,
+      taskId: failedTask.id,
+      error: 'provider offline'
+    });
+
+    await expect(
+      readResearchTaskResult(settings, { projectId: project.id, taskId: failedTask.id })
+    ).rejects.toThrow('completed');
+  });
+
+  it('forces research task segmentId to null until stable anchors are supported', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: '无稳定段落锚点' });
+    const input = {
+      projectId: project.id,
+      userPrompt: '核实这一段',
+      contextMarkdown: '上下文',
+      title: '段落资料任务',
+      segmentId: 'seg_unstable'
+    };
+
+    const task = await createResearchTask(settings, input, 'chat');
+
+    expect(task.segmentId).toBeNull();
+  });
+
+  it('serializes a manual append and completed-task adoption in one project journal', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: '混合并发写入' });
+    const task = await createResearchTask(settings, {
+      projectId: project.id,
+      userPrompt: '核实并发资料',
+      contextMarkdown: '上下文',
+      title: '并发资料任务'
+    }, 'chat');
+    await completeResearchTask(settings, {
+      projectId: project.id,
+      taskId: task.id,
+      resultMarkdown: '## 任务并发候选资料'
+    });
+
+    const results = await Promise.allSettled([
+      appendMarkdownToProjectDocument(settings, {
+        projectId: project.id,
+        markdown: '\n## 手动并发追加\n',
+        summary: '手动并发追加'
+      }),
+      appendTaskResultToDocument(settings, {
+        projectId: project.id,
+        taskId: task.id,
+        summary: '采纳并发任务'
+      })
+    ]);
+
+    expect(results.every((result) => result.status === 'fulfilled')).toBe(true);
+    const document = await readProjectDocument(settings, project.id);
+    expect(document.content.match(/手动并发追加/g)).toHaveLength(1);
+    expect(document.content.match(/任务并发候选资料/g)).toHaveLength(1);
+    const projectRoot = path.join(tempDir, project.projectPath);
+    const journalRoot = path.join(projectRoot, '.podcast-artist', 'write-journal');
+    const [pending, applying, applied, failed] = await Promise.all(
+      ['pending', 'applying', 'applied', 'failed'].map((status) => readdir(path.join(journalRoot, status)))
+    );
+    expect(applied).toHaveLength(2);
+    expect(pending).toHaveLength(0);
+    expect(applying).toHaveLength(0);
+    expect(failed).toHaveLength(0);
+    const appliedIntents = await Promise.all(
+      applied.map(async (fileName) => JSON.parse(await readFile(path.join(journalRoot, 'applied', fileName), 'utf8')) as { status: string })
+    );
+    expect(appliedIntents.map((intent) => intent.status)).toEqual(['applied', 'applied']);
+  });
+
+  it('does not adopt a task when its write intent fails behind an older pending intent', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: '失败采纳不回写任务' });
+    const task = await createResearchTask(settings, {
+      projectId: project.id,
+      userPrompt: '核实失败采纳',
+      contextMarkdown: '上下文',
+      title: '失败采纳任务'
+    }, 'chat');
+    await completeResearchTask(settings, {
+      projectId: project.id,
+      taskId: task.id,
+      resultMarkdown: '## 不应出现的失败候选'
+    });
+    await createMarkdownAppendIntent(settings, {
+      projectId: project.id,
+      markdown: '\n## 更早的手动待写入\n',
+      summary: '更早的手动 intent'
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2));
+
+    await expect(
+      appendTaskResultToDocument(settings, {
+        projectId: project.id,
+        taskId: task.id,
+        summary: '会因 base hash 失败的采纳'
+      })
+    ).rejects.toThrow('failed');
+
+    const document = await readProjectDocument(settings, project.id);
+    expect(document.content).toContain('更早的手动待写入');
+    expect(document.content).not.toContain('不应出现的失败候选');
+    const [persistedTask] = await readProjectTasks(settings, project.id);
+    expect(persistedTask?.writeIntentPath).toBeNull();
+  });
+
+  it('recovers an applied task intent when task.json lost writeIntentPath', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: '恢复已应用采纳' });
+    const task = await createResearchTask(settings, {
+      projectId: project.id,
+      userPrompt: '核实可恢复采纳',
+      contextMarkdown: '上下文',
+      title: '可恢复采纳任务'
+    }, 'chat');
+    await completeResearchTask(settings, {
+      projectId: project.id,
+      taskId: task.id,
+      resultMarkdown: '## 只应写入一次的候选资料'
+    });
+    const firstResult = await appendTaskResultToDocument(settings, {
+      projectId: project.id,
+      taskId: task.id,
+      summary: '首次采纳'
+    });
+    const projectRoot = path.join(tempDir, project.projectPath);
+    const taskPath = path.join(projectRoot, '.podcast-artist', 'tasks', task.id, 'task.json');
+    const adoptedTask = JSON.parse(await readFile(taskPath, 'utf8')) as { writeIntentPath: string | null };
+    await writeFile(taskPath, `${JSON.stringify({ ...adoptedTask, writeIntentPath: null }, null, 2)}\n`, 'utf8');
+
+    const recoveredResult = await appendTaskResultToDocument(settings, {
+      projectId: project.id,
+      taskId: task.id,
+      summary: '重试采纳'
+    });
+
+    expect(recoveredResult.intent.id).toBe(firstResult.intent.id);
+    expect(recoveredResult.intent.status).toBe('applied');
+    const document = await readProjectDocument(settings, project.id);
+    expect(document.content.match(/只应写入一次的候选资料/g)).toHaveLength(1);
+    const [repairedTask] = await readProjectTasks(settings, project.id);
+    expect(repairedTask?.writeIntentPath).toMatch(new RegExp(`${firstResult.intent.id}\\.json$`));
   });
 
   it('serializes concurrent adoption of the same completed task', async () => {

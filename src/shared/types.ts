@@ -225,7 +225,6 @@ export interface CreateResearchTaskInput {
   title: string;
   userPrompt: string;
   contextMarkdown: string;
-  segmentId?: string | null;
   providerProfileId?: string | null;
 }
 

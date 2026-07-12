@@ -2117,7 +2117,7 @@ function DocumentsView({
             使用选中文稿
           </button>
         </div>
-        <button className="primary-button" type="submit" disabled={isSubmittingTask || !selectedProviderProfileId || !taskPrompt.trim()}>
+        <button className="primary-button" type="submit" disabled={!currentProjectId || isSubmittingTask || !selectedProviderProfileId || !taskPrompt.trim()}>
           <Send size={16} />
           {isSubmittingTask ? '正在启动...' : '启动资料任务'}
         </button>
