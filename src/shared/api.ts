@@ -27,6 +27,8 @@ import type {
   ProjectDocument,
   ProviderProfilesFile,
   ProjectSummary,
+  ReadResearchTaskResultInput,
+  ResearchTaskResult,
   RippleDeleteAudioClipInput,
   UpdateAudioTrackInput,
   UpdateAudioClipTimingInput,
@@ -45,6 +47,7 @@ export interface PodcastArtistApi {
   appendMarkdownToProjectDocument(input: CreateMarkdownAppendIntentInput): Promise<AppendMarkdownDocumentResult>;
   createResearchTask(input: CreateResearchTaskInput): Promise<AgentTask>;
   readProjectTasks(projectId: string): Promise<AgentTask[]>;
+  readResearchTaskResult(input: ReadResearchTaskResultInput): Promise<ResearchTaskResult>;
   appendTaskResultToDocument(input: AppendTaskResultInput): Promise<AppendMarkdownDocumentResult>;
   readProjectLibrary(projectId: string): Promise<LibraryAssetsFile>;
   readAudioEditPlan(projectId: string): Promise<AudioEditPlan>;

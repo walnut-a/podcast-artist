@@ -28,6 +28,7 @@ import type {
   ProjectDocument,
   ProviderProfilesFile,
   ProjectSummary,
+  ReadResearchTaskResultInput,
   RippleDeleteAudioClipInput,
   UpdateAudioTrackInput,
   UpdateAudioClipTimingInput
@@ -38,7 +39,7 @@ export const isBrowserPreview = !window.podcastArtist;
 let previewState: AppBootstrapState = createPreviewState();
 const previewDocuments = new Map<string, string>();
 const previewLibraries = new Map<string, LibraryAssetsFile>();
-const previewTasks = new Map<string, AgentTask & { resultMarkdown: string }>();
+const previewTasks = new Map<string, { task: AgentTask; resultMarkdown: string }>();
 const previewEditPlans = new Map<string, AudioEditPlan>();
 const previewExportJobs = new Map<string, ExportJob[]>();
 const previewAudioProxies = new Map<string, AudioProxy>();
@@ -244,7 +245,7 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
     const project = previewState.workspace.projects.find((item) => item.id === input.projectId);
     if (!project) throw new Error(`Project not found: ${input.projectId}`);
     const now = new Date().toISOString();
-    const task: AgentTask & { resultMarkdown: string } = {
+    const task = {
       schemaVersion: 'agentTask.v1',
       id: `tsk_preview_${Date.now()}`,
       projectId: input.projectId,
@@ -262,31 +263,53 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
       resultPath: 'result.md',
       writeIntentPath: null,
       createdAt: now,
-      completedAt: now,
-      error: null,
-      resultMarkdown: input.resultMarkdown
-    };
-    previewTasks.set(task.id, task);
+      completedAt: null,
+      error: null
+    } satisfies AgentTask;
+    previewTasks.set(task.id, { task, resultMarkdown: '' });
+    window.setTimeout(() => {
+      const current = previewTasks.get(task.id);
+      if (!current || current.task.status !== 'running') return;
+      previewTasks.set(task.id, {
+        task: { ...task, status: 'completed', completedAt: new Date().toISOString() },
+        resultMarkdown: `## 资料候选\n\n这是浏览器预览生成的候选结果：${input.userPrompt}`
+      });
+    }, 500);
     return task;
   },
   async readProjectTasks(projectId: string) {
     return Array.from(previewTasks.values())
+      .map(({ task }) => task)
       .filter((task) => task.projectId === projectId)
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-      .map(({ resultMarkdown: _resultMarkdown, ...task }) => task);
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  },
+  async readResearchTaskResult(input: ReadResearchTaskResultInput) {
+    const record = previewTasks.get(input.taskId);
+    if (!record || record.task.projectId !== input.projectId) throw new Error(`Task not found: ${input.taskId}`);
+    if (record.task.status === 'running') throw new Error(`Task is still running: ${input.taskId}`);
+    if (record.task.status === 'failed') throw new Error(record.task.error ?? `Task failed: ${input.taskId}`);
+    return {
+      taskId: record.task.id,
+      resultMarkdown: record.resultMarkdown
+    };
   },
   async appendTaskResultToDocument(input: AppendTaskResultInput) {
-    const task = previewTasks.get(input.taskId);
-    if (!task) throw new Error(`Task not found: ${input.taskId}`);
+    const record = previewTasks.get(input.taskId);
+    if (!record || record.task.projectId !== input.projectId) throw new Error(`Task not found: ${input.taskId}`);
+    if (record.task.status !== 'completed') throw new Error(`Task must be completed before adoption: ${input.taskId}`);
+    if (record.task.writeIntentPath) throw new Error(`Task result was already adopted: ${input.taskId}`);
     const result = await podcastArtistApi.appendMarkdownToProjectDocument({
       projectId: input.projectId,
-      markdown: `\n${task.resultMarkdown.trimEnd()}\n`,
+      markdown: `\n${record.resultMarkdown.trimEnd()}\n`,
       summary: input.summary,
-      sourceTaskId: task.id
+      sourceTaskId: record.task.id
     });
-    previewTasks.set(task.id, {
-      ...task,
-      writeIntentPath: `../../write-journal/applied/${result.intent.id}.json`
+    previewTasks.set(record.task.id, {
+      ...record,
+      task: {
+        ...record.task,
+        writeIntentPath: `../../write-journal/applied/${result.intent.id}.json`
+      }
     });
     return result;
   },

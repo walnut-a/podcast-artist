@@ -14,6 +14,7 @@ import type {
   GenerateAudioPeaksInput,
   InsertAudioGapInput,
   ProviderProfilesFile,
+  ReadResearchTaskResultInput,
   RippleDeleteAudioClipInput,
   UpdateAudioTrackInput,
   UpdateAudioClipTimingInput
@@ -31,6 +32,7 @@ const api: PodcastArtistApi = {
   appendMarkdownToProjectDocument: (input: CreateMarkdownAppendIntentInput) => ipcRenderer.invoke('document:appendMarkdown', input),
   createResearchTask: (input: CreateResearchTaskInput) => ipcRenderer.invoke('task:createResearchTask', input),
   readProjectTasks: (projectId: string) => ipcRenderer.invoke('task:readProjectTasks', projectId),
+  readResearchTaskResult: (input: ReadResearchTaskResultInput) => ipcRenderer.invoke('task:readResearchTaskResult', input),
   appendTaskResultToDocument: (input: AppendTaskResultInput) => ipcRenderer.invoke('task:appendResultToDocument', input),
   readProjectLibrary: (projectId: string) => ipcRenderer.invoke('library:readProjectLibrary', projectId),
   readAudioEditPlan: (projectId: string) => ipcRenderer.invoke('audio:readEditPlan', projectId),
