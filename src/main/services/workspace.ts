@@ -19,6 +19,7 @@ import type {
   AudioProxy,
   AudioAssetProcessingInput,
   AudioTrack,
+  CompleteResearchTaskInput,
   CreateAudioTrackInput,
   CreateMarkdownAppendIntentInput,
   CreateProjectInput,
@@ -26,6 +27,7 @@ import type {
   DeleteAudioTrackInput,
   ExportAudioInput,
   ExportJob,
+  FailResearchTaskInput,
   FileHash,
   GenerateAudioPeaksInput,
   ImportLibraryAssetInput,
@@ -37,6 +39,9 @@ import type {
   ProjectDocument,
   ProjectManifest,
   ProjectSummary,
+  ProviderKind,
+  ReadResearchTaskResultInput,
+  ResearchTaskResult,
   RippleDeleteAudioClipInput,
   UpdateAudioTrackInput,
   UpdateAudioClipTimingInput,
@@ -334,7 +339,11 @@ export async function appendMarkdownToProjectDocument(
   };
 }
 
-export async function createResearchTask(settings: AppSettings, input: CreateResearchTaskInput): Promise<AgentTask> {
+export async function createResearchTask(
+  settings: AppSettings,
+  input: CreateResearchTaskInput,
+  providerKind: ProviderKind
+): Promise<AgentTask> {
   const projectRecord = await findProjectById(settings, input.projectId);
   if (!projectRecord) {
     throw new Error(`Project not found: ${input.projectId}`);
@@ -343,11 +352,6 @@ export async function createResearchTask(settings: AppSettings, input: CreateRes
   const userPrompt = input.userPrompt.trim();
   if (!userPrompt) {
     throw new Error('Task prompt is required.');
-  }
-
-  const resultMarkdown = input.resultMarkdown.trim();
-  if (!resultMarkdown) {
-    throw new Error('Task result is required.');
   }
 
   const taskId = createId('tsk');
@@ -361,9 +365,9 @@ export async function createResearchTask(settings: AppSettings, input: CreateRes
     segmentId: input.segmentId ?? null,
     type: 'research',
     title: input.title.trim() || userPrompt.slice(0, 48),
-    status: 'completed',
+    status: 'running',
     provider: {
-      kind: 'research',
+      kind: providerKind,
       profileId: input.providerProfileId ?? null
     },
     userPrompt,
@@ -371,14 +375,61 @@ export async function createResearchTask(settings: AppSettings, input: CreateRes
     resultPath: 'result.md',
     writeIntentPath: null,
     createdAt: now,
-    completedAt: now,
+    completedAt: null,
     error: null
   };
 
   await writeTextFile(path.join(taskRoot, task.contextPath), input.contextMarkdown.trimEnd() + '\n');
-  await writeTextFile(path.join(taskRoot, task.resultPath), resultMarkdown + '\n');
+  await writeTextFile(path.join(taskRoot, task.resultPath), '');
   await writeJsonFile(path.join(taskRoot, 'task.json'), task);
   return task;
+}
+
+export async function completeResearchTask(
+  settings: AppSettings,
+  input: CompleteResearchTaskInput
+): Promise<AgentTask> {
+  const { task, taskPath } = await readResearchTask(settings, input.projectId, input.taskId);
+  if (task.status !== 'running') {
+    throw new Error(`Task must be running before completion: ${input.taskId}`);
+  }
+
+  await writeTextFile(path.join(path.dirname(taskPath), task.resultPath), `${input.resultMarkdown.trim()}\n`);
+  const completed: AgentTask = {
+    ...task,
+    status: 'completed',
+    completedAt: new Date().toISOString(),
+    error: null
+  };
+  await writeJsonFile(taskPath, completed);
+  return completed;
+}
+
+export async function failResearchTask(settings: AppSettings, input: FailResearchTaskInput): Promise<AgentTask> {
+  const { task, taskPath } = await readResearchTask(settings, input.projectId, input.taskId);
+  if (task.status !== 'running') {
+    throw new Error(`Task must be running before failure: ${input.taskId}`);
+  }
+
+  const failed: AgentTask = {
+    ...task,
+    status: 'failed',
+    completedAt: new Date().toISOString(),
+    error: input.error.trim().slice(0, 1000)
+  };
+  await writeJsonFile(taskPath, failed);
+  return failed;
+}
+
+export async function readResearchTaskResult(
+  settings: AppSettings,
+  input: ReadResearchTaskResultInput
+): Promise<ResearchTaskResult> {
+  const { task, taskPath } = await readResearchTask(settings, input.projectId, input.taskId);
+  return {
+    taskId: task.id,
+    resultMarkdown: await readFile(path.join(path.dirname(taskPath), task.resultPath), 'utf8')
+  };
 }
 
 export async function readProjectTasks(settings: AppSettings, projectId: string): Promise<AgentTask[]> {
@@ -410,10 +461,12 @@ export async function appendTaskResultToDocument(
     throw new Error(`Project not found: ${input.projectId}`);
   }
 
-  const taskPath = path.join(projectRecord.projectRoot, '.podcast-artist', 'tasks', input.taskId, 'task.json');
-  const task = await readJsonFile<AgentTask>(taskPath);
-  if (!task) {
-    throw new Error(`Task not found: ${input.taskId}`);
+  const { task, taskPath } = await readResearchTask(settings, input.projectId, input.taskId);
+  if (task.status !== 'completed') {
+    throw new Error(`Task must be completed before its result can be adopted: ${input.taskId}`);
+  }
+  if (task.writeIntentPath) {
+    throw new Error(`Task result was already adopted: ${input.taskId}`);
   }
 
   const resultMarkdown = await readFile(path.join(path.dirname(taskPath), task.resultPath), 'utf8');
@@ -427,6 +480,24 @@ export async function appendTaskResultToDocument(
   await writeJsonFile(taskPath, { ...task, writeIntentPath });
 
   return appendResult;
+}
+
+async function readResearchTask(
+  settings: AppSettings,
+  projectId: string,
+  taskId: string
+): Promise<{ task: AgentTask; taskPath: string }> {
+  const projectRecord = await findProjectById(settings, projectId);
+  if (!projectRecord) {
+    throw new Error(`Project not found: ${projectId}`);
+  }
+
+  const taskPath = path.join(projectRecord.projectRoot, '.podcast-artist', 'tasks', taskId, 'task.json');
+  const task = await readJsonFile<AgentTask>(taskPath);
+  if (!task) {
+    throw new Error(`Task not found: ${taskId}`);
+  }
+  return { task, taskPath };
 }
 
 export async function readProjectLibrary(settings: AppSettings, projectId: string): Promise<LibraryAssetsFile> {

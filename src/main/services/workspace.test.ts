@@ -9,6 +9,7 @@ import {
   appendTaskResultToDocument,
   applyPendingWriteIntents,
   buildFfmpegRenderArgs,
+  completeResearchTask,
   createAudioTrackInEditPlan,
   createResearchTask,
   createMarkdownAppendIntent,
@@ -24,6 +25,7 @@ import {
   readAudioEditPlan,
   readProjectLibrary,
   readProjectTasks,
+  readResearchTaskResult,
   rippleDeleteAudioClip,
   updateAudioTrackInEditPlan,
   updateAudioClipTiming
@@ -166,36 +168,30 @@ describe('workspace local file contract', () => {
     expect(versionDirs).toHaveLength(0);
   });
 
-  it('creates a research task ledger and can append the task result through the write journal', async () => {
+  it('persists running, completed, and adopted task states separately', async () => {
     const settings = createSettings(tempDir);
     const project = await createProject(settings, { title: '第 24 期 本地优先' });
-    const projectRoot = path.join(tempDir, project.projectPath);
-
     const task = await createResearchTask(settings, {
       projectId: project.id,
       userPrompt: '核实这一段说法',
       contextMarkdown: '用户正在查看：本地优先工具为什么重要。',
-      resultMarkdown: '## 资料补充\n\n本地优先可以降低长期维护成本。',
-      title: '本地优先资料核实'
-    });
+      title: '本地优先资料核实',
+      providerProfileId: 'prv_test'
+    }, 'chat');
+    expect(task.status).toBe('running');
+    await expect(appendTaskResultToDocument(settings, { projectId: project.id, taskId: task.id, summary: '采纳结果' })).rejects.toThrow('completed');
 
-    const taskRoot = path.join(projectRoot, '.podcast-artist', 'tasks', task.id);
-    await expectFile(path.join(taskRoot, 'task.json'));
-    expect(await readFile(path.join(taskRoot, 'context.md'), 'utf8')).toContain('用户正在查看');
-    expect(await readFile(path.join(taskRoot, 'result.md'), 'utf8')).toContain('本地优先可以降低长期维护成本');
-    expect((await readProjectTasks(settings, project.id)).map((item) => item.id)).toEqual([task.id]);
-
-    const appendResult = await appendTaskResultToDocument(settings, {
+    const completed = await completeResearchTask(settings, {
       projectId: project.id,
       taskId: task.id,
-      summary: '采纳资料任务结果'
+      resultMarkdown: '## 资料补充\n\n本地优先可以降低长期维护成本。'
     });
+    expect(completed.status).toBe('completed');
+    expect((await readResearchTaskResult(settings, { projectId: project.id, taskId: task.id })).resultMarkdown).toContain('长期维护成本');
 
-    expect(appendResult.applyResult.applied).toBe(1);
-    expect(appendResult.intent.sourceTaskId).toBe(task.id);
+    const appendResult = await appendTaskResultToDocument(settings, { projectId: project.id, taskId: task.id, summary: '采纳资料任务结果' });
     expect(appendResult.document.content).toContain('本地优先可以降低长期维护成本');
-    const [appliedTask] = await readProjectTasks(settings, project.id);
-    expect(appliedTask.writeIntentPath).toContain('write-journal');
+    await expect(appendTaskResultToDocument(settings, { projectId: project.id, taskId: task.id, summary: '重复采纳' })).rejects.toThrow('already');
   });
 
   it('creates audio edit plans with two default tracks and can add more tracks', async () => {
