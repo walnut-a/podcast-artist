@@ -212,7 +212,7 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
         schemaVersion: 'writeIntent.v1',
         id: `wit_preview_${Date.now()}`,
         projectId: input.projectId,
-        sourceTaskId: input.sourceTaskId ?? null,
+        sourceTaskId: null,
         target: {
           kind: 'markdown_document',
           path: document.path,
@@ -301,8 +301,7 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
     const result = await podcastArtistApi.appendMarkdownToProjectDocument({
       projectId: input.projectId,
       markdown: `\n${record.resultMarkdown.trimEnd()}\n`,
-      summary: input.summary,
-      sourceTaskId: record.task.id
+      summary: input.summary
     });
     previewTasks.set(record.task.id, {
       ...record,

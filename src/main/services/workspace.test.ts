@@ -2,7 +2,7 @@ import { access, chmod, mkdtemp, readdir, readFile, rm, stat, writeFile } from '
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AppSettings } from '../../shared/types';
+import type { AppSettings, CreateMarkdownAppendIntentInput } from '../../shared/types';
 import {
   addAudioClipToEditPlan,
   analyzeAudioAsset,
@@ -367,6 +367,45 @@ describe('workspace local file contract', () => {
     expect(document.content.match(/只应写入一次的候选资料/g)).toHaveLength(1);
     const [repairedTask] = await readProjectTasks(settings, project.id);
     expect(repairedTask?.writeIntentPath).toMatch(new RegExp(`${firstResult.intent.id}\\.json$`));
+  });
+
+  it('does not trust a sourceTaskId injected through the public manual append input', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: '公开追加不可伪造任务来源' });
+    const task = await createResearchTask(settings, {
+      projectId: project.id,
+      userPrompt: '核实真实候选',
+      contextMarkdown: '上下文',
+      title: '真实候选任务'
+    }, 'chat');
+    await completeResearchTask(settings, {
+      projectId: project.id,
+      taskId: task.id,
+      resultMarkdown: '## 真实任务候选'
+    });
+    const payloadWithInjectedSource = {
+      projectId: project.id,
+      markdown: '\n## 伪造的手动内容\n',
+      summary: '尝试伪造任务来源',
+      sourceTaskId: task.id
+    };
+    const maliciousIpcPayload: CreateMarkdownAppendIntentInput = payloadWithInjectedSource;
+
+    const forgedAppend = await appendMarkdownToProjectDocument(settings, maliciousIpcPayload);
+    const adoption = await appendTaskResultToDocument(settings, {
+      projectId: project.id,
+      taskId: task.id,
+      summary: '正常采纳真实候选'
+    });
+
+    expect(forgedAppend.intent.sourceTaskId).toBeNull();
+    expect(adoption.intent.id).not.toBe(forgedAppend.intent.id);
+    expect(adoption.intent.sourceTaskId).toBe(task.id);
+    const document = await readProjectDocument(settings, project.id);
+    expect(document.content.match(/伪造的手动内容/g)).toHaveLength(1);
+    expect(document.content.match(/真实任务候选/g)).toHaveLength(1);
+    const [adoptedTask] = await readProjectTasks(settings, project.id);
+    expect(adoptedTask?.writeIntentPath).toMatch(new RegExp(`${adoption.intent.id}\\.json$`));
   });
 
   it('serializes concurrent adoption of the same completed task', async () => {

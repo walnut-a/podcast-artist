@@ -172,7 +172,6 @@ export interface CreateMarkdownAppendIntentInput {
   projectId: string;
   markdown: string;
   summary: string;
-  sourceTaskId?: string | null;
 }
 
 export interface ProjectDocument {

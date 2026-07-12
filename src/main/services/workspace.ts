@@ -51,6 +51,10 @@ import type {
 import { createId, slugifyProjectTitle } from './ids';
 import { ensureDir, readJsonFile, writeJsonFile, writeTextFile } from './jsonFile';
 
+interface WorkspaceMarkdownAppendIntentInput extends CreateMarkdownAppendIntentInput {
+  sourceTaskId: string | null;
+}
+
 export async function ensureWorkspace(settings: AppSettings): Promise<WorkspaceSummary> {
   const workspacePath = settings.workspacePath;
   await ensureDir(workspacePath);
@@ -222,12 +226,14 @@ export async function createMarkdownAppendIntent(
   settings: AppSettings,
   input: CreateMarkdownAppendIntentInput
 ): Promise<MarkdownAppendWriteIntent> {
-  return withProjectDocumentWriteLock(settings, input.projectId, () => createMarkdownAppendIntentUnlocked(settings, input));
+  return withProjectDocumentWriteLock(settings, input.projectId, () =>
+    createMarkdownAppendIntentUnlocked(settings, { ...input, sourceTaskId: null })
+  );
 }
 
 async function createMarkdownAppendIntentUnlocked(
   settings: AppSettings,
-  input: CreateMarkdownAppendIntentInput
+  input: WorkspaceMarkdownAppendIntentInput
 ): Promise<MarkdownAppendWriteIntent> {
   const markdown = input.markdown;
   if (!markdown.trim()) {
@@ -246,7 +252,7 @@ async function createMarkdownAppendIntentUnlocked(
     schemaVersion: 'writeIntent.v1',
     id: createId('wit'),
     projectId: projectRecord.manifest.id,
-    sourceTaskId: input.sourceTaskId ?? null,
+    sourceTaskId: input.sourceTaskId,
     target: {
       kind: 'markdown_document',
       path: projectRecord.manifest.document.path,
@@ -341,13 +347,13 @@ export async function appendMarkdownToProjectDocument(
   input: CreateMarkdownAppendIntentInput
 ): Promise<AppendMarkdownDocumentResult> {
   return withProjectDocumentWriteLock(settings, input.projectId, () =>
-    appendMarkdownToProjectDocumentUnlocked(settings, input)
+    appendMarkdownToProjectDocumentUnlocked(settings, { ...input, sourceTaskId: null })
   );
 }
 
 async function appendMarkdownToProjectDocumentUnlocked(
   settings: AppSettings,
-  input: CreateMarkdownAppendIntentInput
+  input: WorkspaceMarkdownAppendIntentInput
 ): Promise<AppendMarkdownDocumentResult> {
   const pendingIntent = await createMarkdownAppendIntentUnlocked(settings, input);
   const applyResult = await applyPendingWriteIntentsUnlocked(settings, input.projectId);
