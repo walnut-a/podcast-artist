@@ -23,6 +23,7 @@ import {
   insertAudioGap,
   readAudioAssetPlaybackData,
   readAudioEditPlan,
+  readProjectDocument,
   readProjectLibrary,
   readProjectTasks,
   readResearchTaskResult,
@@ -192,6 +193,45 @@ describe('workspace local file contract', () => {
     const appendResult = await appendTaskResultToDocument(settings, { projectId: project.id, taskId: task.id, summary: '采纳资料任务结果' });
     expect(appendResult.document.content).toContain('本地优先可以降低长期维护成本');
     await expect(appendTaskResultToDocument(settings, { projectId: project.id, taskId: task.id, summary: '重复采纳' })).rejects.toThrow('already');
+  });
+
+  it('serializes concurrent adoption of the same completed task', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: '第 24 期 本地优先' });
+    const task = await createResearchTask(settings, {
+      projectId: project.id,
+      userPrompt: '核实这一段说法',
+      contextMarkdown: '用户正在查看：本地优先工具为什么重要。',
+      title: '本地优先资料核实',
+      providerProfileId: 'prv_test'
+    }, 'chat');
+    await completeResearchTask(settings, {
+      projectId: project.id,
+      taskId: task.id,
+      resultMarkdown: '## 并发采纳候选资料'
+    });
+
+    const results = await Promise.allSettled([
+      appendTaskResultToDocument(settings, { projectId: project.id, taskId: task.id, summary: '并发采纳 A' }),
+      appendTaskResultToDocument(settings, { projectId: project.id, taskId: task.id, summary: '并发采纳 B' })
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    const rejected = results.find((result) => result.status === 'rejected');
+    expect(rejected?.reason).toBeInstanceOf(Error);
+    expect((rejected as PromiseRejectedResult).reason.message).toContain('already');
+    const document = await readProjectDocument(settings, project.id);
+    expect(document.content.match(/并发采纳候选资料/g)).toHaveLength(1);
+    const [adoptedTask] = await readProjectTasks(settings, project.id);
+    expect(adoptedTask?.writeIntentPath).toMatch(/write-journal\/applied\/wit_.+\.json$/);
+    const projectRoot = path.join(tempDir, project.projectPath);
+    const journalRoot = path.join(projectRoot, '.podcast-artist', 'write-journal');
+    const journalEntries = await Promise.all(
+      ['pending', 'applying', 'applied', 'failed'].map((status) => readdir(path.join(journalRoot, status)))
+    );
+    expect(journalEntries.flat()).toHaveLength(1);
+    expect(journalEntries[2]).toHaveLength(1);
   });
 
   it('creates audio edit plans with two default tracks and can add more tracks', async () => {

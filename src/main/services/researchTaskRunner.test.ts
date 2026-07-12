@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSettings, CreateResearchTaskInput, ProviderProfilesFile } from '../../shared/types';
-import { createProject, readResearchTaskResult } from './workspace';
+import { createProject, readProjectTasks, readResearchTaskResult } from './workspace';
 import { startResearchTask } from './researchTaskRunner';
 
 let tempDir: string;
@@ -62,5 +62,13 @@ describe('research task runner', () => {
     const failed = await started.completion;
     expect(failed.status).toBe('failed');
     expect(failed.error).toContain('provider offline');
+  });
+
+  it('persists synchronous requester failures instead of leaving the task running', async () => {
+    const started = await startResearchTask(settings, providers, input, () => { throw new Error('synchronous provider failure'); });
+    const failed = await started.completion;
+    expect(failed.status).toBe('failed');
+    expect(failed.error).toContain('synchronous provider failure');
+    expect((await readProjectTasks(settings, input.projectId))[0]?.status).toBe('failed');
   });
 });

@@ -15,7 +15,8 @@ export async function startResearchTask(
   if (!profile) throw new Error('A valid research provider profile is required.');
 
   const task = await createResearchTask(settings, { ...input, providerProfileId: profile.id }, profile.kind);
-  const completion = request({ profile, prompt: input.userPrompt, contextMarkdown: input.contextMarkdown })
+  const completion = Promise.resolve()
+    .then(() => request({ profile, prompt: input.userPrompt, contextMarkdown: input.contextMarkdown }))
     .then((resultMarkdown) => completeResearchTask(settings, {
       projectId: input.projectId,
       taskId: task.id,

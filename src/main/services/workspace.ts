@@ -452,34 +452,54 @@ export async function readProjectTasks(settings: AppSettings, projectId: string)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
+const researchTaskAdoptionTails = new Map<string, Promise<void>>();
+
 export async function appendTaskResultToDocument(
   settings: AppSettings,
   input: AppendTaskResultInput
 ): Promise<AppendMarkdownDocumentResult> {
-  const projectRecord = await findProjectById(settings, input.projectId);
-  if (!projectRecord) {
-    throw new Error(`Project not found: ${input.projectId}`);
-  }
+  const lockKey = `${path.resolve(settings.workspacePath)}\0${input.projectId}\0${input.taskId}`;
+  return withResearchTaskAdoptionLock(lockKey, async () => {
+    const { task, taskPath } = await readResearchTask(settings, input.projectId, input.taskId);
+    if (task.status !== 'completed') {
+      throw new Error(`Task must be completed before its result can be adopted: ${input.taskId}`);
+    }
+    if (task.writeIntentPath) {
+      throw new Error(`Task result was already adopted: ${input.taskId}`);
+    }
 
-  const { task, taskPath } = await readResearchTask(settings, input.projectId, input.taskId);
-  if (task.status !== 'completed') {
-    throw new Error(`Task must be completed before its result can be adopted: ${input.taskId}`);
-  }
-  if (task.writeIntentPath) {
-    throw new Error(`Task result was already adopted: ${input.taskId}`);
-  }
+    const resultMarkdown = await readFile(path.join(path.dirname(taskPath), task.resultPath), 'utf8');
+    const appendResult = await appendMarkdownToProjectDocument(settings, {
+      projectId: input.projectId,
+      markdown: `\n${resultMarkdown.trimEnd()}\n`,
+      summary: input.summary,
+      sourceTaskId: task.id
+    });
+    const writeIntentPath = path.join('..', '..', 'write-journal', 'applied', `${appendResult.intent.id}.json`);
+    await writeJsonFile(taskPath, { ...task, writeIntentPath });
 
-  const resultMarkdown = await readFile(path.join(path.dirname(taskPath), task.resultPath), 'utf8');
-  const appendResult = await appendMarkdownToProjectDocument(settings, {
-    projectId: input.projectId,
-    markdown: `\n${resultMarkdown.trimEnd()}\n`,
-    summary: input.summary,
-    sourceTaskId: task.id
+    return appendResult;
   });
-  const writeIntentPath = path.join('..', '..', 'write-journal', 'applied', `${appendResult.intent.id}.json`);
-  await writeJsonFile(taskPath, { ...task, writeIntentPath });
+}
 
-  return appendResult;
+async function withResearchTaskAdoptionLock<T>(lockKey: string, operation: () => Promise<T>): Promise<T> {
+  const previous = researchTaskAdoptionTails.get(lockKey) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => current);
+  researchTaskAdoptionTails.set(lockKey, tail);
+
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (researchTaskAdoptionTails.get(lockKey) === tail) {
+      researchTaskAdoptionTails.delete(lockKey);
+    }
+  }
 }
 
 async function readResearchTask(
