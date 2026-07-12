@@ -253,7 +253,7 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
       segmentId: input.segmentId ?? null,
       type: 'research',
       title: input.title,
-      status: 'completed',
+      status: 'running',
       provider: {
         kind: 'research',
         profileId: input.providerProfileId ?? null

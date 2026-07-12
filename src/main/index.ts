@@ -179,7 +179,9 @@ function registerIpc(): void {
   ipcMain.handle('task:createResearchTask', async (_event, input: CreateResearchTaskInput) => {
     const { settings, providers } = await ensureAppConfig();
     const started = await startResearchTask(settings, providers, input);
-    void started.completion;
+    void started.completion.catch((completionError) => {
+      console.error(`Research task completion failed for ${started.task.id}:`, completionError);
+    });
     return started.task;
   });
 
