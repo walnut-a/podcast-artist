@@ -452,14 +452,14 @@ export async function readProjectTasks(settings: AppSettings, projectId: string)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
-const researchTaskAdoptionTails = new Map<string, Promise<void>>();
+const projectAdoptionTails = new Map<string, Promise<void>>();
 
 export async function appendTaskResultToDocument(
   settings: AppSettings,
   input: AppendTaskResultInput
 ): Promise<AppendMarkdownDocumentResult> {
-  const lockKey = `${path.resolve(settings.workspacePath)}\0${input.projectId}\0${input.taskId}`;
-  return withResearchTaskAdoptionLock(lockKey, async () => {
+  const lockKey = `${path.resolve(settings.workspacePath)}\0${input.projectId}`;
+  return withProjectAdoptionLock(lockKey, async () => {
     const { task, taskPath } = await readResearchTask(settings, input.projectId, input.taskId);
     if (task.status !== 'completed') {
       throw new Error(`Task must be completed before its result can be adopted: ${input.taskId}`);
@@ -482,22 +482,22 @@ export async function appendTaskResultToDocument(
   });
 }
 
-async function withResearchTaskAdoptionLock<T>(lockKey: string, operation: () => Promise<T>): Promise<T> {
-  const previous = researchTaskAdoptionTails.get(lockKey) ?? Promise.resolve();
+async function withProjectAdoptionLock<T>(lockKey: string, operation: () => Promise<T>): Promise<T> {
+  const previous = projectAdoptionTails.get(lockKey) ?? Promise.resolve();
   let release!: () => void;
   const current = new Promise<void>((resolve) => {
     release = resolve;
   });
   const tail = previous.then(() => current);
-  researchTaskAdoptionTails.set(lockKey, tail);
+  projectAdoptionTails.set(lockKey, tail);
 
   await previous;
   try {
     return await operation();
   } finally {
     release();
-    if (researchTaskAdoptionTails.get(lockKey) === tail) {
-      researchTaskAdoptionTails.delete(lockKey);
+    if (projectAdoptionTails.get(lockKey) === tail) {
+      projectAdoptionTails.delete(lockKey);
     }
   }
 }

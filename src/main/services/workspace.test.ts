@@ -234,6 +234,62 @@ describe('workspace local file contract', () => {
     expect(journalEntries[2]).toHaveLength(1);
   });
 
+  it('serializes concurrent adoption of different completed tasks in one project', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: '第 24 期 本地优先' });
+    const firstTask = await createResearchTask(settings, {
+      projectId: project.id,
+      userPrompt: '核实第一段说法',
+      contextMarkdown: '第一段上下文。',
+      title: '第一份资料',
+      providerProfileId: 'prv_test'
+    }, 'chat');
+    const secondTask = await createResearchTask(settings, {
+      projectId: project.id,
+      userPrompt: '核实第二段说法',
+      contextMarkdown: '第二段上下文。',
+      title: '第二份资料',
+      providerProfileId: 'prv_test'
+    }, 'chat');
+    await Promise.all([
+      completeResearchTask(settings, {
+        projectId: project.id,
+        taskId: firstTask.id,
+        resultMarkdown: '## 第一份并发候选资料'
+      }),
+      completeResearchTask(settings, {
+        projectId: project.id,
+        taskId: secondTask.id,
+        resultMarkdown: '## 第二份并发候选资料'
+      })
+    ]);
+
+    const results = await Promise.allSettled([
+      appendTaskResultToDocument(settings, { projectId: project.id, taskId: firstTask.id, summary: '采纳第一份资料' }),
+      appendTaskResultToDocument(settings, { projectId: project.id, taskId: secondTask.id, summary: '采纳第二份资料' })
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(2);
+    const document = await readProjectDocument(settings, project.id);
+    expect(document.content.match(/第一份并发候选资料/g)).toHaveLength(1);
+    expect(document.content.match(/第二份并发候选资料/g)).toHaveLength(1);
+    const tasks = await readProjectTasks(settings, project.id);
+    const firstWriteIntentPath = tasks.find((task) => task.id === firstTask.id)?.writeIntentPath;
+    const secondWriteIntentPath = tasks.find((task) => task.id === secondTask.id)?.writeIntentPath;
+    expect(firstWriteIntentPath).toMatch(/write-journal\/applied\/wit_.+\.json$/);
+    expect(secondWriteIntentPath).toMatch(/write-journal\/applied\/wit_.+\.json$/);
+    expect(firstWriteIntentPath).not.toBe(secondWriteIntentPath);
+    const projectRoot = path.join(tempDir, project.projectPath);
+    const journalRoot = path.join(projectRoot, '.podcast-artist', 'write-journal');
+    const [pending, applying, applied, failed] = await Promise.all(
+      ['pending', 'applying', 'applied', 'failed'].map((status) => readdir(path.join(journalRoot, status)))
+    );
+    expect(applied).toHaveLength(2);
+    expect(pending).toHaveLength(0);
+    expect(applying).toHaveLength(0);
+    expect(failed).toHaveLength(0);
+  });
+
   it('creates audio edit plans with two default tracks and can add more tracks', async () => {
     const settings = createSettings(tempDir);
     const project = await createProject(settings, { title: 'Tracks' });
