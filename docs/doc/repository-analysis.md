@@ -101,6 +101,8 @@
 - 音频播放数据模块：为 renderer 提供当前项目素材库副本、proxy URL、peaks 和时长，避免 renderer 直接猜测本地文件路径。
 - 文稿写入队列：生成 Markdown append intent，串行应用 pending intent，写入前保存完整旧版快照，hash 不匹配时进入 failed。
 - 任务账本模块：生成研究任务目录，保存 `task.json`、`context.md`、`result.md`，支持把任务结果采纳到正式 Markdown。
+- OpenAI-compatible provider client（`src/main/services/openAiCompatibleProvider.ts`）：校验 research provider 配置，使用 `none` 或环境变量凭证调用 `/chat/completions`，并返回可审阅的 Markdown 候选结果。
+- 资料任务运行器（`src/main/services/researchTaskRunner.ts`）：先持久化 `running` 任务，再在后台调用 provider；调用成功后转为 `completed`，失败后转为 `failed`。完成结果仍只属于候选区，用户明确采纳后才创建 write intent 并把任务标记为已采纳。
 - 项目素材库读取模块：读取当前项目 `assets.json`，供文稿、转写和剪辑模块引用 `assetId`。
 - 音频 edit plan 模块：读取和更新 `pln_rough_cut.json`，支持把音频素材加入 clips、基础 ripple delete 和 clip 源起止时间更新。
 - 导出模块：根据素材库副本和 edit plan 构造 FFmpeg 参数，输出 WAV，并写入 `.podcast-artist/renders/` render job。
@@ -112,12 +114,12 @@
 
 - 文稿模块：段落锚点、资料引用语法解析和完整 Markdown 编辑器。
 - 素材库模块：本地素材副本、`LibraryAsset`、跨项目引用预留。
-- 任务模块：真实 AI/agent provider 调用、并行任务运行器和任务重试。
+- 任务模块：结果 streaming、稳定段落索引、并行任务调度，以及任务 retry/cancel。
 - 写入队列：崩溃恢复扫描、外部 agent intent 审核和冲突合并 UI。
 - 转写模块：provider 抽象、transcript 数据结构、文本与音频时间映射。
 - 音频剪辑模块：基础 WaveSurfer 波形预览和 clip 时间码编辑已实现；完整可视化时间线、文本/转写驱动的片段操作和更完整的多轨编辑尚未实现。
 - 导出模块：多轨混音细节、进度展示、取消导出和导出参数 UI。
-- 设置与依赖诊断：provider profile 编辑已实现基础版，真实 provider 健康检查尚未实现。
+- 设置与依赖诊断：provider profile 编辑已实现基础版，`runtime_prompt` 凭证输入和真实 provider 健康检查尚未实现。
 
 ## 已实现能力和对外入口
 
@@ -135,6 +137,7 @@
 - 基础多轨剪辑：edit plan 默认两条音轨，支持新增音轨、素材拖入指定音轨、轨道重命名、轨道静音、删除空音轨、时间线缩放、播放头试听、插入空白和按时间线混合导出。
 - Markdown write intent 应用、文档版本快照和 hash 冲突失败保护。
 - 研究任务账本与任务结果采纳。
+- OpenAI-compatible `/chat/completions` 资料调用，支持 `none`/环境变量凭证；任务状态持久化为 `running → completed|failed`，候选结果只有经过明确采纳并创建 write intent 后才进入正式文稿。
 - 项目素材库读取和基础非破坏性音频 edit plan。
 - 基础 ripple delete 和 clip timing 数据更新。
 - 基础 WAV 导出渲染和 render job 记录，导出时跳过静音音轨，并按片段时间线起点混合未静音音轨。
