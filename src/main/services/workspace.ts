@@ -43,11 +43,14 @@ import type {
   ReadResearchTaskResultInput,
   ResearchTaskResult,
   RippleDeleteAudioClipInput,
+  SplitAudioClipInput,
+  SplitAudioClipResult,
   UpdateAudioTrackInput,
   UpdateAudioClipTimingInput,
   WorkspaceManifest,
   WorkspaceSummary
 } from '../../shared/types';
+import { splitAudioClipInPlan } from '../../shared/audioEditPlan';
 import { createId, slugifyProjectTitle } from './ids';
 import { ensureDir, readJsonFile, writeJsonFile, writeTextFile } from './jsonFile';
 
@@ -957,6 +960,28 @@ export async function rippleDeleteAudioClip(
   await writeAudioEditPlanForProject(projectRecord.projectRoot, nextPlan);
   await touchProjectManifest(projectRecord.projectRoot, projectRecord.manifest, nextPlan.updatedAt);
   return nextPlan;
+}
+
+export async function splitAudioClip(
+  settings: AppSettings,
+  input: SplitAudioClipInput
+): Promise<SplitAudioClipResult> {
+  const projectRecord = await findProjectById(settings, input.projectId);
+  if (!projectRecord) {
+    throw new Error(`Project not found: ${input.projectId}`);
+  }
+
+  const plan = await readAudioEditPlanForProject(projectRecord.projectRoot);
+  const result = splitAudioClipInPlan({
+    plan,
+    clipId: input.clipId,
+    timelineSplitMs: input.timelineSplitMs,
+    rightClipId: createId('clp'),
+    updatedAt: new Date().toISOString()
+  });
+  await writeAudioEditPlanForProject(projectRecord.projectRoot, result.plan);
+  await touchProjectManifest(projectRecord.projectRoot, projectRecord.manifest, result.plan.updatedAt);
+  return result;
 }
 
 export async function updateAudioClipTiming(
