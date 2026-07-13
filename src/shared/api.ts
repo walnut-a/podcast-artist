@@ -30,6 +30,8 @@ import type {
   ReadResearchTaskResultInput,
   ResearchTaskResult,
   RippleDeleteAudioClipInput,
+  SplitAudioClipInput,
+  SplitAudioClipResult,
   UpdateAudioTrackInput,
   UpdateAudioClipTimingInput,
   WorkspaceSummary
@@ -56,6 +58,7 @@ export interface PodcastArtistApi {
   deleteAudioTrack(input: DeleteAudioTrackInput): Promise<AudioEditPlan>;
   addAudioClipToEditPlan(input: AddAudioClipInput): Promise<AudioClip>;
   rippleDeleteAudioClip(input: RippleDeleteAudioClipInput): Promise<AudioEditPlan>;
+  splitAudioClip(input: SplitAudioClipInput): Promise<SplitAudioClipResult>;
   updateAudioClipTiming(input: UpdateAudioClipTimingInput): Promise<AudioEditPlan>;
   insertAudioGap(input: InsertAudioGapInput): Promise<AudioEditPlan>;
   exportAudioEditPlan(input: ExportAudioInput): Promise<ExportJob>;

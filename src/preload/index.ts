@@ -16,6 +16,7 @@ import type {
   ProviderProfilesFile,
   ReadResearchTaskResultInput,
   RippleDeleteAudioClipInput,
+  SplitAudioClipInput,
   UpdateAudioTrackInput,
   UpdateAudioClipTimingInput
 } from '../shared/types';
@@ -41,6 +42,7 @@ const api: PodcastArtistApi = {
   deleteAudioTrack: (input: DeleteAudioTrackInput) => ipcRenderer.invoke('audio:deleteTrack', input),
   addAudioClipToEditPlan: (input: AddAudioClipInput) => ipcRenderer.invoke('audio:addClipToEditPlan', input),
   rippleDeleteAudioClip: (input: RippleDeleteAudioClipInput) => ipcRenderer.invoke('audio:rippleDeleteClip', input),
+  splitAudioClip: (input: SplitAudioClipInput) => ipcRenderer.invoke('audio:splitClip', input),
   updateAudioClipTiming: (input: UpdateAudioClipTimingInput) => ipcRenderer.invoke('audio:updateClipTiming', input),
   insertAudioGap: (input: InsertAudioGapInput) => ipcRenderer.invoke('audio:insertGap', input),
   exportAudioEditPlan: (input: ExportAudioInput) => ipcRenderer.invoke('audio:exportEditPlan', input),

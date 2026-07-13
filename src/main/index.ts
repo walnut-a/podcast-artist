@@ -17,6 +17,7 @@ import type {
   ProviderProfilesFile,
   ReadResearchTaskResultInput,
   RippleDeleteAudioClipInput,
+  SplitAudioClipInput,
   UpdateAudioTrackInput,
   UpdateAudioClipTimingInput
 } from '../shared/types';
@@ -42,6 +43,7 @@ import {
   readProjectTasks,
   readResearchTaskResult,
   rippleDeleteAudioClip,
+  splitAudioClip,
   updateAudioTrackInEditPlan,
   deleteAudioTrackInEditPlan,
   updateAudioClipTiming
@@ -233,6 +235,11 @@ function registerIpc(): void {
   ipcMain.handle('audio:rippleDeleteClip', async (_event, input: RippleDeleteAudioClipInput) => {
     const { settings } = await ensureAppConfig();
     return rippleDeleteAudioClip(settings, input);
+  });
+
+  ipcMain.handle('audio:splitClip', async (_event, input: SplitAudioClipInput) => {
+    const { settings } = await ensureAppConfig();
+    return splitAudioClip(settings, input);
   });
 
   ipcMain.handle('audio:updateClipTiming', async (_event, input: UpdateAudioClipTimingInput) => {

@@ -25,6 +25,10 @@ import {
 } from 'lucide-react';
 import type { CSSProperties, DragEvent, KeyboardEvent, MouseEvent, ReactElement, ReactNode } from 'react';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  MIN_SPLIT_CLIP_DURATION_MS,
+  canSplitAudioClipAtTimelineMs
+} from '../../shared/audioEditPlan';
 import type {
   AgentTask,
   AppBootstrapState,
@@ -67,7 +71,7 @@ const timelineZoomSliderStep = 0.05;
 const timelineZoomMotionMs = 180;
 const clipTrimStepMs = 1_000;
 const clipGapStepMs = 1_000;
-const minClipDurationMs = 250;
+const minClipDurationMs = MIN_SPLIT_CLIP_DURATION_MS;
 
 export function App(): ReactElement {
   const [state, setState] = useState<AppBootstrapState | null>(null);
@@ -924,6 +928,9 @@ function AudioView({
     () => (selectedClipId ? editPlan?.clips.find((clip) => clip.id === selectedClipId) ?? null : null),
     [editPlan, selectedClipId]
   );
+  const canSplitSelectedClip = Boolean(
+    selectedClip && canSplitAudioClipAtTimelineMs(selectedClip, playheadMs)
+  );
   const selectedClipAssetDurationMs = selectedClip ? getAssetAudioDurationMs(audioAssetById.get(selectedClip.assetId)) : null;
   const selectedClipDurationMs = selectedClip ? selectedClip.sourceEndMs - selectedClip.sourceStartMs : 0;
   const canRestoreClipStart = Boolean(selectedClip && selectedClip.sourceStartMs > 0);
@@ -1348,10 +1355,40 @@ function AudioView({
     await handleAddClipToTrack(selectedAudioAssetId, trackName);
   }
 
+  async function handleSplitSelectedClip(): Promise<void> {
+    if (!currentProjectId || !selectedClip || !canSplitSelectedClip) return;
+
+    const timelineSplitMs = Math.round(playheadMs);
+    stopTimelinePlayback();
+    setAudioError(null);
+    setIsAudioBusy(true);
+    try {
+      const result = await podcastArtistApi.splitAudioClip({
+        projectId: currentProjectId,
+        clipId: selectedClip.id,
+        timelineSplitMs
+      });
+      setEditPlan(result.plan);
+      setSelectedClipId(result.rightClipId);
+      setPlayheadMs(timelineSplitMs);
+    } catch (splitError) {
+      setAudioError(toErrorMessage(splitError));
+    } finally {
+      setIsAudioBusy(false);
+    }
+  }
+
   function handleTimelineKeyDown(event: KeyboardEvent<HTMLElement>): void {
     const target = event.target as HTMLElement | null;
     if (target?.closest('input, textarea, [contenteditable="true"]')) return;
     if (!selectedClipId || isAudioBusy) return;
+
+    if (event.key.toLowerCase() === 's') {
+      if (!canSplitSelectedClip) return;
+      event.preventDefault();
+      void handleSplitSelectedClip();
+      return;
+    }
 
     if (event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault();
@@ -1514,6 +1551,19 @@ function AudioView({
               {selectedClip ? (
                 <div className="clip-trim-toolbar" aria-label="修剪片段">
                   <span>{formatDuration(selectedClipDurationMs)}</span>
+                  <button
+                    type="button"
+                    onClick={() => void handleSplitSelectedClip()}
+                    disabled={isAudioBusy || !canSplitSelectedClip}
+                    title={
+                      canSplitSelectedClip
+                        ? '在播放头切开（S）'
+                        : `将播放头移到片段内部，且距离边界至少 ${MIN_SPLIT_CLIP_DURATION_MS}ms`
+                    }
+                  >
+                    <Scissors size={13} />
+                    在播放头切开
+                  </button>
                   <button
                     type="button"
                     onClick={() => void handleInsertGapNearSelectedClip('before')}

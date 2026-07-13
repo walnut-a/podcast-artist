@@ -9,4 +9,21 @@ describe('documents research task controls', () => {
       /disabled=\{[^}]*!currentProjectId[^}]*isSubmittingTask[^}]*!selectedProviderProfileId[^}]*!taskPrompt\.trim\(\)[^}]*\}/
     );
   });
+
+  it('wires playhead split through Electron, browser mock, and right-clip selection', async () => {
+    const [appSource, apiClientSource, mainSource, preloadSource] = await Promise.all([
+      readFile(new URL('./App.tsx', import.meta.url), 'utf8'),
+      readFile(new URL('./apiClient.ts', import.meta.url), 'utf8'),
+      readFile(new URL('../../main/index.ts', import.meta.url), 'utf8'),
+      readFile(new URL('../../preload/index.ts', import.meta.url), 'utf8')
+    ]);
+
+    expect(mainSource).toContain("ipcMain.handle('audio:splitClip'");
+    expect(preloadSource).toContain("ipcRenderer.invoke('audio:splitClip', input)");
+    expect(apiClientSource).toContain('splitAudioClipInPlan({');
+    expect(appSource).toContain("event.key.toLowerCase() === 's'");
+    expect(appSource).toContain('podcastArtistApi.splitAudioClip({');
+    expect(appSource).toContain('setSelectedClipId(result.rightClipId)');
+    expect(appSource).toContain('在播放头切开');
+  });
 });

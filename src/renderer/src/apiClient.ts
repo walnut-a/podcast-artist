@@ -1,4 +1,5 @@
 import type { PodcastArtistApi } from '../../shared/api';
+import { splitAudioClipInPlan } from '../../shared/audioEditPlan';
 import type {
   AgentTask,
   AddAudioClipInput,
@@ -30,6 +31,7 @@ import type {
   ProjectSummary,
   ReadResearchTaskResultInput,
   RippleDeleteAudioClipInput,
+  SplitAudioClipInput,
   UpdateAudioTrackInput,
   UpdateAudioClipTimingInput
 } from '../../shared/types';
@@ -44,6 +46,7 @@ const previewEditPlans = new Map<string, AudioEditPlan>();
 const previewExportJobs = new Map<string, ExportJob[]>();
 const previewAudioProxies = new Map<string, AudioProxy>();
 const previewAudioPeaks = new Map<string, AudioPeaks>();
+let previewSplitClipSequence = 0;
 
 const localPreviewAudioFileName = '一周年纪念_缩混.wav';
 const localPreviewAudioUrl = `/dev-local/${encodeURIComponent(localPreviewAudioFileName)}`;
@@ -420,6 +423,19 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
     };
     previewEditPlans.set(input.projectId, nextPlan);
     return nextPlan;
+  },
+  async splitAudioClip(input: SplitAudioClipInput) {
+    const plan = getPreviewEditPlan(input.projectId);
+    previewSplitClipSequence += 1;
+    const result = splitAudioClipInPlan({
+      plan,
+      clipId: input.clipId,
+      timelineSplitMs: input.timelineSplitMs,
+      rightClipId: `clp_preview_split_${previewSplitClipSequence}`,
+      updatedAt: new Date().toISOString()
+    });
+    previewEditPlans.set(input.projectId, result.plan);
+    return result;
   },
   async updateAudioClipTiming(input: UpdateAudioClipTimingInput) {
     const sourceStartMs = Math.max(0, Math.round(input.sourceStartMs));
