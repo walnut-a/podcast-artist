@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
-describe('documents research task controls', () => {
+describe('renderer research-task and timeline wiring contracts', () => {
   it('disables the task-start button when no project is selected', async () => {
     const source = await readFile(new URL('./App.tsx', import.meta.url), 'utf8');
 
