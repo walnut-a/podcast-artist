@@ -1371,6 +1371,7 @@ function AudioView({
       setEditPlan(result.plan);
       setSelectedClipId(result.rightClipId);
       setPlayheadMs(timelineSplitMs);
+      timelinePanelRef.current?.focus();
     } catch (splitError) {
       setAudioError(toErrorMessage(splitError));
     } finally {

@@ -115,6 +115,25 @@ describe('splitAudioClipInPlan', () => {
     expect(canSplitAudioClipAtTimelineMs(clip, Number.NaN)).toBe(false);
   });
 
+  it.each([
+    ['before the clip starts', 1_999],
+    ['after the clip ends', 6_001]
+  ])('rejects a split %s without mutating the plan', (_case, timelineSplitMs) => {
+    const plan = createPlan();
+    const originalPlan = structuredClone(plan);
+
+    expect(() =>
+      splitAudioClipInPlan({
+        plan,
+        clipId: 'clp_target',
+        timelineSplitMs,
+        rightClipId: 'clp_right',
+        updatedAt: '2026-07-13T08:05:00.000Z'
+      })
+    ).toThrow('250ms');
+    expect(plan).toEqual(originalPlan);
+  });
+
   it('rejects invalid positions, missing clips, and duplicate right ids', () => {
     const plan = createPlan();
     expect(() =>

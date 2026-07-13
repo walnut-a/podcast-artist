@@ -10,7 +10,7 @@ describe('renderer research-task and timeline wiring contracts', () => {
     );
   });
 
-  it('wires playhead split through Electron, browser mock, and right-clip selection', async () => {
+  it('wires playhead split through Electron, browser mock, right-clip selection, and timeline focus handoff', async () => {
     const [appSource, apiClientSource, mainSource, preloadSource] = await Promise.all([
       readFile(new URL('./App.tsx', import.meta.url), 'utf8'),
       readFile(new URL('./apiClient.ts', import.meta.url), 'utf8'),
@@ -24,6 +24,7 @@ describe('renderer research-task and timeline wiring contracts', () => {
     expect(appSource).toContain("event.key.toLowerCase() === 's'");
     expect(appSource).toContain('podcastArtistApi.splitAudioClip({');
     expect(appSource).toContain('setSelectedClipId(result.rightClipId)');
+    expect(appSource).toContain('timelinePanelRef.current?.focus()');
     expect(appSource).toContain('在播放头切开');
   });
 });
