@@ -636,6 +636,8 @@ status: accepted
 
 波纹剪辑改变的是 clips 的排列和时间，不改变源文件。删除 clip、更新 clip 的 `sourceStartMs` / `sourceEndMs`、插入空白或移动片段，都应该先落到 edit plan。更新某个 clip 时，应用可以按同轨 ripple 规则调整后续 clip 的 `timelineStartMs`，确保剪辑计划保持连续。导出时由本地音频引擎读取 `assetId` 对应的素材副本和这份 plan 生成新音频。
 
+在播放头切割 clip 时，左段沿用原 ID，右段生成新的 `clp_` ID，两段继续引用同一个 `assetId`。左段更新 `sourceEndMs`，保留原淡入和增益，并把内侧 `fadeOutMs` 设为 0；右段更新 `sourceStartMs` 和 `timelineStartMs`，保留原淡出和增益，并把内侧 `fadeInMs` 设为 0。切割本身不移动其他 clip，只有随后执行波纹删除时，同轨后续片段才向前吸附。
+
 ## 17. 导出和 render 记录
 
 导出结果是派生文件。导出失败不能影响素材库和 edit plan。

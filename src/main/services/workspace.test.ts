@@ -30,6 +30,7 @@ import {
   readProjectTasks,
   readResearchTaskResult,
   rippleDeleteAudioClip,
+  splitAudioClip,
   updateAudioTrackInEditPlan,
   updateAudioClipTiming
 } from './workspace';
@@ -602,6 +603,67 @@ describe('workspace local file contract', () => {
     expect(nextPlan.clips[0]?.timelineStartMs).toBe(0);
     expect(await readFile(path.join(tempDir, 'library', 'projects', project.slug, hostAsset.libraryPath), 'utf8')).toBe('host audio data');
     await expectFile(path.join(projectRoot, '.podcast-artist', 'edit-plans', 'pln_rough_cut.json'));
+  });
+
+  it('splits an audio clip at the playhead and persists both source ranges', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: 'Split clip' });
+    const sourcePath = path.join(tempDir, 'host.wav');
+    await writeFile(sourcePath, Buffer.from('host audio data'));
+    const asset = await importLibraryAsset(settings, {
+      projectId: project.id,
+      sourcePath,
+      kind: 'audio'
+    });
+
+    const firstClip = await addAudioClipToEditPlan(settings, {
+      projectId: project.id,
+      assetId: asset.id,
+      trackName: '音轨 1',
+      sourceStartMs: 1_000,
+      sourceEndMs: 5_000
+    });
+    const laterClip = await addAudioClipToEditPlan(settings, {
+      projectId: project.id,
+      assetId: asset.id,
+      trackName: '音轨 1',
+      sourceStartMs: 5_000,
+      sourceEndMs: 6_000
+    });
+
+    const result = await splitAudioClip(settings, {
+      projectId: project.id,
+      clipId: firstClip.id,
+      timelineSplitMs: 1_500
+    });
+    const persisted = await readAudioEditPlan(settings, project.id);
+    const leftClip = persisted.clips.find((clip) => clip.id === result.leftClipId);
+    const rightClip = persisted.clips.find((clip) => clip.id === result.rightClipId);
+
+    expect(result.rightClipId).toMatch(/^clp_/);
+    expect(leftClip).toMatchObject({
+      sourceStartMs: 1_000,
+      sourceEndMs: 2_500,
+      timelineStartMs: 0,
+      fadeInMs: 20,
+      fadeOutMs: 0
+    });
+    expect(rightClip).toMatchObject({
+      sourceStartMs: 2_500,
+      sourceEndMs: 5_000,
+      timelineStartMs: 1_500,
+      fadeInMs: 0,
+      fadeOutMs: 20
+    });
+    expect(persisted.clips.find((clip) => clip.id === laterClip.id)?.timelineStartMs).toBe(4_000);
+    expect(result.plan).toEqual(persisted);
+    const manifest = JSON.parse(
+      await readFile(path.join(tempDir, 'projects', project.slug, 'project.json'), 'utf8')
+    ) as { updatedAt: string };
+    expect(manifest.updatedAt).toBe(persisted.updatedAt);
+    expect(
+      await readFile(path.join(tempDir, 'library', 'projects', project.slug, asset.libraryPath), 'utf8')
+    ).toBe('host audio data');
   });
 
   it('updates clip timing and ripples later clips on the same track', async () => {
