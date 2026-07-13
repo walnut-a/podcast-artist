@@ -335,6 +335,18 @@ export interface RippleDeleteAudioClipInput {
   clipId: string;
 }
 
+export interface SplitAudioClipInput {
+  projectId: string;
+  clipId: string;
+  timelineSplitMs: number;
+}
+
+export interface SplitAudioClipResult {
+  plan: AudioEditPlan;
+  leftClipId: string;
+  rightClipId: string;
+}
+
 export interface UpdateAudioClipTimingInput {
   projectId: string;
   clipId: string;
