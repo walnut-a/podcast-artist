@@ -19,6 +19,7 @@ import type {
   AudioProxy,
   AudioAssetProcessingInput,
   AudioTrack,
+  CompleteResearchTaskInput,
   CreateAudioTrackInput,
   CreateMarkdownAppendIntentInput,
   CreateProjectInput,
@@ -26,6 +27,7 @@ import type {
   DeleteAudioTrackInput,
   ExportAudioInput,
   ExportJob,
+  FailResearchTaskInput,
   FileHash,
   GenerateAudioPeaksInput,
   ImportLibraryAssetInput,
@@ -37,6 +39,9 @@ import type {
   ProjectDocument,
   ProjectManifest,
   ProjectSummary,
+  ProviderKind,
+  ReadResearchTaskResultInput,
+  ResearchTaskResult,
   RippleDeleteAudioClipInput,
   UpdateAudioTrackInput,
   UpdateAudioClipTimingInput,
@@ -45,6 +50,10 @@ import type {
 } from '../../shared/types';
 import { createId, slugifyProjectTitle } from './ids';
 import { ensureDir, readJsonFile, writeJsonFile, writeTextFile } from './jsonFile';
+
+interface WorkspaceMarkdownAppendIntentInput extends CreateMarkdownAppendIntentInput {
+  sourceTaskId: string | null;
+}
 
 export async function ensureWorkspace(settings: AppSettings): Promise<WorkspaceSummary> {
   const workspacePath = settings.workspacePath;
@@ -217,6 +226,15 @@ export async function createMarkdownAppendIntent(
   settings: AppSettings,
   input: CreateMarkdownAppendIntentInput
 ): Promise<MarkdownAppendWriteIntent> {
+  return withProjectDocumentWriteLock(settings, input.projectId, () =>
+    createMarkdownAppendIntentUnlocked(settings, { ...input, sourceTaskId: null })
+  );
+}
+
+async function createMarkdownAppendIntentUnlocked(
+  settings: AppSettings,
+  input: WorkspaceMarkdownAppendIntentInput
+): Promise<MarkdownAppendWriteIntent> {
   const markdown = input.markdown;
   if (!markdown.trim()) {
     throw new Error('Markdown payload is required.');
@@ -234,7 +252,7 @@ export async function createMarkdownAppendIntent(
     schemaVersion: 'writeIntent.v1',
     id: createId('wit'),
     projectId: projectRecord.manifest.id,
-    sourceTaskId: input.sourceTaskId ?? null,
+    sourceTaskId: input.sourceTaskId,
     target: {
       kind: 'markdown_document',
       path: projectRecord.manifest.document.path,
@@ -258,6 +276,10 @@ export async function createMarkdownAppendIntent(
 }
 
 export async function applyPendingWriteIntents(settings: AppSettings, projectId: string): Promise<ApplyWriteIntentResult> {
+  return withProjectDocumentWriteLock(settings, projectId, () => applyPendingWriteIntentsUnlocked(settings, projectId));
+}
+
+async function applyPendingWriteIntentsUnlocked(settings: AppSettings, projectId: string): Promise<ApplyWriteIntentResult> {
   const projectRecord = await findProjectById(settings, projectId);
   if (!projectRecord) {
     throw new Error(`Project not found: ${projectId}`);
@@ -324,8 +346,21 @@ export async function appendMarkdownToProjectDocument(
   settings: AppSettings,
   input: CreateMarkdownAppendIntentInput
 ): Promise<AppendMarkdownDocumentResult> {
-  const intent = await createMarkdownAppendIntent(settings, input);
-  const applyResult = await applyPendingWriteIntents(settings, input.projectId);
+  return withProjectDocumentWriteLock(settings, input.projectId, () =>
+    appendMarkdownToProjectDocumentUnlocked(settings, { ...input, sourceTaskId: null })
+  );
+}
+
+async function appendMarkdownToProjectDocumentUnlocked(
+  settings: AppSettings,
+  input: WorkspaceMarkdownAppendIntentInput
+): Promise<AppendMarkdownDocumentResult> {
+  const pendingIntent = await createMarkdownAppendIntentUnlocked(settings, input);
+  const applyResult = await applyPendingWriteIntentsUnlocked(settings, input.projectId);
+  const intent = await readSettledWriteIntent(settings, input.projectId, pendingIntent.id);
+  if (!intent) {
+    throw new Error(`Write intent did not reach a final state: ${pendingIntent.id}`);
+  }
   const document = await readProjectDocument(settings, input.projectId);
   return {
     intent,
@@ -334,7 +369,11 @@ export async function appendMarkdownToProjectDocument(
   };
 }
 
-export async function createResearchTask(settings: AppSettings, input: CreateResearchTaskInput): Promise<AgentTask> {
+export async function createResearchTask(
+  settings: AppSettings,
+  input: CreateResearchTaskInput,
+  providerKind: ProviderKind
+): Promise<AgentTask> {
   const projectRecord = await findProjectById(settings, input.projectId);
   if (!projectRecord) {
     throw new Error(`Project not found: ${input.projectId}`);
@@ -345,11 +384,6 @@ export async function createResearchTask(settings: AppSettings, input: CreateRes
     throw new Error('Task prompt is required.');
   }
 
-  const resultMarkdown = input.resultMarkdown.trim();
-  if (!resultMarkdown) {
-    throw new Error('Task result is required.');
-  }
-
   const taskId = createId('tsk');
   const taskRoot = path.join(projectRecord.projectRoot, '.podcast-artist', 'tasks', taskId);
   const now = new Date().toISOString();
@@ -358,12 +392,12 @@ export async function createResearchTask(settings: AppSettings, input: CreateRes
     id: taskId,
     projectId: projectRecord.manifest.id,
     documentId: projectRecord.manifest.document.id,
-    segmentId: input.segmentId ?? null,
+    segmentId: null,
     type: 'research',
     title: input.title.trim() || userPrompt.slice(0, 48),
-    status: 'completed',
+    status: 'running',
     provider: {
-      kind: 'research',
+      kind: providerKind,
       profileId: input.providerProfileId ?? null
     },
     userPrompt,
@@ -371,14 +405,64 @@ export async function createResearchTask(settings: AppSettings, input: CreateRes
     resultPath: 'result.md',
     writeIntentPath: null,
     createdAt: now,
-    completedAt: now,
+    completedAt: null,
     error: null
   };
 
   await writeTextFile(path.join(taskRoot, task.contextPath), input.contextMarkdown.trimEnd() + '\n');
-  await writeTextFile(path.join(taskRoot, task.resultPath), resultMarkdown + '\n');
+  await writeTextFile(path.join(taskRoot, task.resultPath), '');
   await writeJsonFile(path.join(taskRoot, 'task.json'), task);
   return task;
+}
+
+export async function completeResearchTask(
+  settings: AppSettings,
+  input: CompleteResearchTaskInput
+): Promise<AgentTask> {
+  const { task, taskPath } = await readResearchTask(settings, input.projectId, input.taskId);
+  if (task.status !== 'running') {
+    throw new Error(`Task must be running before completion: ${input.taskId}`);
+  }
+
+  await writeTextFile(path.join(path.dirname(taskPath), task.resultPath), `${input.resultMarkdown.trim()}\n`);
+  const completed: AgentTask = {
+    ...task,
+    status: 'completed',
+    completedAt: new Date().toISOString(),
+    error: null
+  };
+  await writeJsonFile(taskPath, completed);
+  return completed;
+}
+
+export async function failResearchTask(settings: AppSettings, input: FailResearchTaskInput): Promise<AgentTask> {
+  const { task, taskPath } = await readResearchTask(settings, input.projectId, input.taskId);
+  if (task.status !== 'running') {
+    throw new Error(`Task must be running before failure: ${input.taskId}`);
+  }
+
+  const failed: AgentTask = {
+    ...task,
+    status: 'failed',
+    completedAt: new Date().toISOString(),
+    error: input.error.trim().slice(0, 1000)
+  };
+  await writeJsonFile(taskPath, failed);
+  return failed;
+}
+
+export async function readResearchTaskResult(
+  settings: AppSettings,
+  input: ReadResearchTaskResultInput
+): Promise<ResearchTaskResult> {
+  const { task, taskPath } = await readResearchTask(settings, input.projectId, input.taskId);
+  if (task.status !== 'completed') {
+    throw new Error(`Task must be completed before reading its result: ${input.taskId}`);
+  }
+  return {
+    taskId: task.id,
+    resultMarkdown: await readFile(path.join(path.dirname(taskPath), task.resultPath), 'utf8')
+  };
 }
 
 export async function readProjectTasks(settings: AppSettings, projectId: string): Promise<AgentTask[]> {
@@ -401,32 +485,129 @@ export async function readProjectTasks(settings: AppSettings, projectId: string)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
+const projectDocumentWriteTails = new Map<string, Promise<void>>();
+
 export async function appendTaskResultToDocument(
   settings: AppSettings,
   input: AppendTaskResultInput
 ): Promise<AppendMarkdownDocumentResult> {
-  const projectRecord = await findProjectById(settings, input.projectId);
+  return withProjectDocumentWriteLock(settings, input.projectId, async () => {
+    const { task, taskPath } = await readResearchTask(settings, input.projectId, input.taskId);
+    if (task.status !== 'completed') {
+      throw new Error(`Task must be completed before its result can be adopted: ${input.taskId}`);
+    }
+    if (task.writeIntentPath) {
+      throw new Error(`Task result was already adopted: ${input.taskId}`);
+    }
+
+    const recoveredIntent = await findAppliedWriteIntentBySourceTaskId(settings, input.projectId, task.id);
+    if (recoveredIntent) {
+      await writeJsonFile(taskPath, { ...task, writeIntentPath: toTaskWriteIntentPath(recoveredIntent.id) });
+      return {
+        intent: recoveredIntent,
+        applyResult: { projectId: input.projectId, applied: 0, failed: 0, skipped: 1 },
+        document: await readProjectDocument(settings, input.projectId)
+      };
+    }
+
+    const resultMarkdown = await readFile(path.join(path.dirname(taskPath), task.resultPath), 'utf8');
+    const appendResult = await appendMarkdownToProjectDocumentUnlocked(settings, {
+      projectId: input.projectId,
+      markdown: `\n${resultMarkdown.trimEnd()}\n`,
+      summary: input.summary,
+      sourceTaskId: task.id
+    });
+    if (appendResult.intent.status !== 'applied') {
+      throw new Error(`Task write intent failed: ${appendResult.intent.error ?? appendResult.intent.id}`);
+    }
+    await writeJsonFile(taskPath, { ...task, writeIntentPath: toTaskWriteIntentPath(appendResult.intent.id) });
+
+    return appendResult;
+  });
+}
+
+async function withProjectDocumentWriteLock<T>(
+  settings: AppSettings,
+  projectId: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  const lockKey = `${path.resolve(settings.workspacePath)}\0${projectId}`;
+  const previous = projectDocumentWriteTails.get(lockKey) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => current);
+  projectDocumentWriteTails.set(lockKey, tail);
+
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (projectDocumentWriteTails.get(lockKey) === tail) {
+      projectDocumentWriteTails.delete(lockKey);
+    }
+  }
+}
+
+async function readSettledWriteIntent(
+  settings: AppSettings,
+  projectId: string,
+  intentId: string
+): Promise<MarkdownAppendWriteIntent | null> {
+  const projectRecord = await findProjectById(settings, projectId);
   if (!projectRecord) {
-    throw new Error(`Project not found: ${input.projectId}`);
+    throw new Error(`Project not found: ${projectId}`);
+  }
+  const journalRoot = path.join(projectRecord.projectRoot, '.podcast-artist', 'write-journal');
+  return (
+    (await readJsonFile<MarkdownAppendWriteIntent>(path.join(journalRoot, 'applied', `${intentId}.json`))) ??
+    readJsonFile<MarkdownAppendWriteIntent>(path.join(journalRoot, 'failed', `${intentId}.json`))
+  );
+}
+
+async function findAppliedWriteIntentBySourceTaskId(
+  settings: AppSettings,
+  projectId: string,
+  sourceTaskId: string
+): Promise<MarkdownAppendWriteIntent | null> {
+  const projectRecord = await findProjectById(settings, projectId);
+  if (!projectRecord) {
+    throw new Error(`Project not found: ${projectId}`);
+  }
+  const appliedRoot = path.join(projectRecord.projectRoot, '.podcast-artist', 'write-journal', 'applied');
+  await ensureDir(appliedRoot);
+  const fileNames = (await readdir(appliedRoot)).filter((fileName) => fileName.endsWith('.json')).sort();
+  for (const fileName of fileNames) {
+    const intent = await readJsonFile<MarkdownAppendWriteIntent>(path.join(appliedRoot, fileName));
+    if (intent?.status === 'applied' && intent.sourceTaskId === sourceTaskId) {
+      return intent;
+    }
+  }
+  return null;
+}
+
+function toTaskWriteIntentPath(intentId: string): string {
+  return path.join('..', '..', 'write-journal', 'applied', `${intentId}.json`);
+}
+
+async function readResearchTask(
+  settings: AppSettings,
+  projectId: string,
+  taskId: string
+): Promise<{ task: AgentTask; taskPath: string }> {
+  const projectRecord = await findProjectById(settings, projectId);
+  if (!projectRecord) {
+    throw new Error(`Project not found: ${projectId}`);
   }
 
-  const taskPath = path.join(projectRecord.projectRoot, '.podcast-artist', 'tasks', input.taskId, 'task.json');
+  const taskPath = path.join(projectRecord.projectRoot, '.podcast-artist', 'tasks', taskId, 'task.json');
   const task = await readJsonFile<AgentTask>(taskPath);
   if (!task) {
-    throw new Error(`Task not found: ${input.taskId}`);
+    throw new Error(`Task not found: ${taskId}`);
   }
-
-  const resultMarkdown = await readFile(path.join(path.dirname(taskPath), task.resultPath), 'utf8');
-  const appendResult = await appendMarkdownToProjectDocument(settings, {
-    projectId: input.projectId,
-    markdown: `\n${resultMarkdown.trimEnd()}\n`,
-    summary: input.summary,
-    sourceTaskId: task.id
-  });
-  const writeIntentPath = path.join('..', '..', 'write-journal', 'applied', `${appendResult.intent.id}.json`);
-  await writeJsonFile(taskPath, { ...task, writeIntentPath });
-
-  return appendResult;
+  return { task, taskPath };
 }
 
 export async function readProjectLibrary(settings: AppSettings, projectId: string): Promise<LibraryAssetsFile> {

@@ -2,13 +2,15 @@ import { access, chmod, mkdtemp, readdir, readFile, rm, stat, writeFile } from '
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AppSettings } from '../../shared/types';
+import type { AppSettings, CreateMarkdownAppendIntentInput } from '../../shared/types';
 import {
   addAudioClipToEditPlan,
   analyzeAudioAsset,
+  appendMarkdownToProjectDocument,
   appendTaskResultToDocument,
   applyPendingWriteIntents,
   buildFfmpegRenderArgs,
+  completeResearchTask,
   createAudioTrackInEditPlan,
   createResearchTask,
   createMarkdownAppendIntent,
@@ -16,14 +18,17 @@ import {
   deleteAudioTrackInEditPlan,
   ensureWorkspace,
   exportAudioEditPlan,
+  failResearchTask,
   generateAudioPeaks,
   generateAudioProxy,
   importLibraryAsset,
   insertAudioGap,
   readAudioAssetPlaybackData,
   readAudioEditPlan,
+  readProjectDocument,
   readProjectLibrary,
   readProjectTasks,
+  readResearchTaskResult,
   rippleDeleteAudioClip,
   updateAudioTrackInEditPlan,
   updateAudioClipTiming
@@ -166,36 +171,336 @@ describe('workspace local file contract', () => {
     expect(versionDirs).toHaveLength(0);
   });
 
-  it('creates a research task ledger and can append the task result through the write journal', async () => {
+  it('persists running, completed, and adopted task states separately', async () => {
     const settings = createSettings(tempDir);
     const project = await createProject(settings, { title: '第 24 期 本地优先' });
-    const projectRoot = path.join(tempDir, project.projectPath);
-
     const task = await createResearchTask(settings, {
       projectId: project.id,
       userPrompt: '核实这一段说法',
       contextMarkdown: '用户正在查看：本地优先工具为什么重要。',
-      resultMarkdown: '## 资料补充\n\n本地优先可以降低长期维护成本。',
-      title: '本地优先资料核实'
-    });
+      title: '本地优先资料核实',
+      providerProfileId: 'prv_test'
+    }, 'chat');
+    expect(task.status).toBe('running');
+    await expect(appendTaskResultToDocument(settings, { projectId: project.id, taskId: task.id, summary: '采纳结果' })).rejects.toThrow('completed');
 
-    const taskRoot = path.join(projectRoot, '.podcast-artist', 'tasks', task.id);
-    await expectFile(path.join(taskRoot, 'task.json'));
-    expect(await readFile(path.join(taskRoot, 'context.md'), 'utf8')).toContain('用户正在查看');
-    expect(await readFile(path.join(taskRoot, 'result.md'), 'utf8')).toContain('本地优先可以降低长期维护成本');
-    expect((await readProjectTasks(settings, project.id)).map((item) => item.id)).toEqual([task.id]);
-
-    const appendResult = await appendTaskResultToDocument(settings, {
+    const completed = await completeResearchTask(settings, {
       projectId: project.id,
       taskId: task.id,
-      summary: '采纳资料任务结果'
+      resultMarkdown: '## 资料补充\n\n本地优先可以降低长期维护成本。'
+    });
+    expect(completed.status).toBe('completed');
+    expect((await readResearchTaskResult(settings, { projectId: project.id, taskId: task.id })).resultMarkdown).toContain('长期维护成本');
+
+    const appendResult = await appendTaskResultToDocument(settings, { projectId: project.id, taskId: task.id, summary: '采纳资料任务结果' });
+    expect(appendResult.document.content).toContain('本地优先可以降低长期维护成本');
+    await expect(appendTaskResultToDocument(settings, { projectId: project.id, taskId: task.id, summary: '重复采纳' })).rejects.toThrow('already');
+  });
+
+  it('rejects reading results from a running research task', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: '资料任务结果状态' });
+    const runningTask = await createResearchTask(settings, {
+      projectId: project.id,
+      userPrompt: '仍在运行的任务',
+      contextMarkdown: '上下文',
+      title: '运行中任务'
+    }, 'chat');
+
+    await expect(
+      readResearchTaskResult(settings, { projectId: project.id, taskId: runningTask.id })
+    ).rejects.toThrow('completed');
+  });
+
+  it('rejects reading results from a failed research task', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: '资料任务失败结果' });
+    const failedTask = await createResearchTask(settings, {
+      projectId: project.id,
+      userPrompt: '将会失败的任务',
+      contextMarkdown: '上下文',
+      title: '失败任务'
+    }, 'chat');
+    await failResearchTask(settings, {
+      projectId: project.id,
+      taskId: failedTask.id,
+      error: 'provider offline'
     });
 
-    expect(appendResult.applyResult.applied).toBe(1);
-    expect(appendResult.intent.sourceTaskId).toBe(task.id);
-    expect(appendResult.document.content).toContain('本地优先可以降低长期维护成本');
-    const [appliedTask] = await readProjectTasks(settings, project.id);
-    expect(appliedTask.writeIntentPath).toContain('write-journal');
+    await expect(
+      readResearchTaskResult(settings, { projectId: project.id, taskId: failedTask.id })
+    ).rejects.toThrow('completed');
+  });
+
+  it('forces research task segmentId to null until stable anchors are supported', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: '无稳定段落锚点' });
+    const input = {
+      projectId: project.id,
+      userPrompt: '核实这一段',
+      contextMarkdown: '上下文',
+      title: '段落资料任务',
+      segmentId: 'seg_unstable'
+    };
+
+    const task = await createResearchTask(settings, input, 'chat');
+
+    expect(task.segmentId).toBeNull();
+  });
+
+  it('serializes a manual append and completed-task adoption in one project journal', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: '混合并发写入' });
+    const task = await createResearchTask(settings, {
+      projectId: project.id,
+      userPrompt: '核实并发资料',
+      contextMarkdown: '上下文',
+      title: '并发资料任务'
+    }, 'chat');
+    await completeResearchTask(settings, {
+      projectId: project.id,
+      taskId: task.id,
+      resultMarkdown: '## 任务并发候选资料'
+    });
+
+    const results = await Promise.allSettled([
+      appendMarkdownToProjectDocument(settings, {
+        projectId: project.id,
+        markdown: '\n## 手动并发追加\n',
+        summary: '手动并发追加'
+      }),
+      appendTaskResultToDocument(settings, {
+        projectId: project.id,
+        taskId: task.id,
+        summary: '采纳并发任务'
+      })
+    ]);
+
+    expect(results.every((result) => result.status === 'fulfilled')).toBe(true);
+    const document = await readProjectDocument(settings, project.id);
+    expect(document.content.match(/手动并发追加/g)).toHaveLength(1);
+    expect(document.content.match(/任务并发候选资料/g)).toHaveLength(1);
+    const projectRoot = path.join(tempDir, project.projectPath);
+    const journalRoot = path.join(projectRoot, '.podcast-artist', 'write-journal');
+    const [pending, applying, applied, failed] = await Promise.all(
+      ['pending', 'applying', 'applied', 'failed'].map((status) => readdir(path.join(journalRoot, status)))
+    );
+    expect(applied).toHaveLength(2);
+    expect(pending).toHaveLength(0);
+    expect(applying).toHaveLength(0);
+    expect(failed).toHaveLength(0);
+    const appliedIntents = await Promise.all(
+      applied.map(async (fileName) => JSON.parse(await readFile(path.join(journalRoot, 'applied', fileName), 'utf8')) as { status: string })
+    );
+    expect(appliedIntents.map((intent) => intent.status)).toEqual(['applied', 'applied']);
+  });
+
+  it('does not adopt a task when its write intent fails behind an older pending intent', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: '失败采纳不回写任务' });
+    const task = await createResearchTask(settings, {
+      projectId: project.id,
+      userPrompt: '核实失败采纳',
+      contextMarkdown: '上下文',
+      title: '失败采纳任务'
+    }, 'chat');
+    await completeResearchTask(settings, {
+      projectId: project.id,
+      taskId: task.id,
+      resultMarkdown: '## 不应出现的失败候选'
+    });
+    await createMarkdownAppendIntent(settings, {
+      projectId: project.id,
+      markdown: '\n## 更早的手动待写入\n',
+      summary: '更早的手动 intent'
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2));
+
+    await expect(
+      appendTaskResultToDocument(settings, {
+        projectId: project.id,
+        taskId: task.id,
+        summary: '会因 base hash 失败的采纳'
+      })
+    ).rejects.toThrow('failed');
+
+    const document = await readProjectDocument(settings, project.id);
+    expect(document.content).toContain('更早的手动待写入');
+    expect(document.content).not.toContain('不应出现的失败候选');
+    const [persistedTask] = await readProjectTasks(settings, project.id);
+    expect(persistedTask?.writeIntentPath).toBeNull();
+  });
+
+  it('recovers an applied task intent when task.json lost writeIntentPath', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: '恢复已应用采纳' });
+    const task = await createResearchTask(settings, {
+      projectId: project.id,
+      userPrompt: '核实可恢复采纳',
+      contextMarkdown: '上下文',
+      title: '可恢复采纳任务'
+    }, 'chat');
+    await completeResearchTask(settings, {
+      projectId: project.id,
+      taskId: task.id,
+      resultMarkdown: '## 只应写入一次的候选资料'
+    });
+    const firstResult = await appendTaskResultToDocument(settings, {
+      projectId: project.id,
+      taskId: task.id,
+      summary: '首次采纳'
+    });
+    const projectRoot = path.join(tempDir, project.projectPath);
+    const taskPath = path.join(projectRoot, '.podcast-artist', 'tasks', task.id, 'task.json');
+    const adoptedTask = JSON.parse(await readFile(taskPath, 'utf8')) as { writeIntentPath: string | null };
+    await writeFile(taskPath, `${JSON.stringify({ ...adoptedTask, writeIntentPath: null }, null, 2)}\n`, 'utf8');
+
+    const recoveredResult = await appendTaskResultToDocument(settings, {
+      projectId: project.id,
+      taskId: task.id,
+      summary: '重试采纳'
+    });
+
+    expect(recoveredResult.intent.id).toBe(firstResult.intent.id);
+    expect(recoveredResult.intent.status).toBe('applied');
+    const document = await readProjectDocument(settings, project.id);
+    expect(document.content.match(/只应写入一次的候选资料/g)).toHaveLength(1);
+    const [repairedTask] = await readProjectTasks(settings, project.id);
+    expect(repairedTask?.writeIntentPath).toMatch(new RegExp(`${firstResult.intent.id}\\.json$`));
+  });
+
+  it('does not trust a sourceTaskId injected through the public manual append input', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: '公开追加不可伪造任务来源' });
+    const task = await createResearchTask(settings, {
+      projectId: project.id,
+      userPrompt: '核实真实候选',
+      contextMarkdown: '上下文',
+      title: '真实候选任务'
+    }, 'chat');
+    await completeResearchTask(settings, {
+      projectId: project.id,
+      taskId: task.id,
+      resultMarkdown: '## 真实任务候选'
+    });
+    const payloadWithInjectedSource = {
+      projectId: project.id,
+      markdown: '\n## 伪造的手动内容\n',
+      summary: '尝试伪造任务来源',
+      sourceTaskId: task.id
+    };
+    const maliciousIpcPayload: CreateMarkdownAppendIntentInput = payloadWithInjectedSource;
+
+    const forgedAppend = await appendMarkdownToProjectDocument(settings, maliciousIpcPayload);
+    const adoption = await appendTaskResultToDocument(settings, {
+      projectId: project.id,
+      taskId: task.id,
+      summary: '正常采纳真实候选'
+    });
+
+    expect(forgedAppend.intent.sourceTaskId).toBeNull();
+    expect(adoption.intent.id).not.toBe(forgedAppend.intent.id);
+    expect(adoption.intent.sourceTaskId).toBe(task.id);
+    const document = await readProjectDocument(settings, project.id);
+    expect(document.content.match(/伪造的手动内容/g)).toHaveLength(1);
+    expect(document.content.match(/真实任务候选/g)).toHaveLength(1);
+    const [adoptedTask] = await readProjectTasks(settings, project.id);
+    expect(adoptedTask?.writeIntentPath).toMatch(new RegExp(`${adoption.intent.id}\\.json$`));
+  });
+
+  it('serializes concurrent adoption of the same completed task', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: '第 24 期 本地优先' });
+    const task = await createResearchTask(settings, {
+      projectId: project.id,
+      userPrompt: '核实这一段说法',
+      contextMarkdown: '用户正在查看：本地优先工具为什么重要。',
+      title: '本地优先资料核实',
+      providerProfileId: 'prv_test'
+    }, 'chat');
+    await completeResearchTask(settings, {
+      projectId: project.id,
+      taskId: task.id,
+      resultMarkdown: '## 并发采纳候选资料'
+    });
+
+    const results = await Promise.allSettled([
+      appendTaskResultToDocument(settings, { projectId: project.id, taskId: task.id, summary: '并发采纳 A' }),
+      appendTaskResultToDocument(settings, { projectId: project.id, taskId: task.id, summary: '并发采纳 B' })
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    const rejected = results.find((result) => result.status === 'rejected');
+    expect(rejected?.reason).toBeInstanceOf(Error);
+    expect((rejected as PromiseRejectedResult).reason.message).toContain('already');
+    const document = await readProjectDocument(settings, project.id);
+    expect(document.content.match(/并发采纳候选资料/g)).toHaveLength(1);
+    const [adoptedTask] = await readProjectTasks(settings, project.id);
+    expect(adoptedTask?.writeIntentPath).toMatch(/write-journal\/applied\/wit_.+\.json$/);
+    const projectRoot = path.join(tempDir, project.projectPath);
+    const journalRoot = path.join(projectRoot, '.podcast-artist', 'write-journal');
+    const journalEntries = await Promise.all(
+      ['pending', 'applying', 'applied', 'failed'].map((status) => readdir(path.join(journalRoot, status)))
+    );
+    expect(journalEntries.flat()).toHaveLength(1);
+    expect(journalEntries[2]).toHaveLength(1);
+  });
+
+  it('serializes concurrent adoption of different completed tasks in one project', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: '第 24 期 本地优先' });
+    const firstTask = await createResearchTask(settings, {
+      projectId: project.id,
+      userPrompt: '核实第一段说法',
+      contextMarkdown: '第一段上下文。',
+      title: '第一份资料',
+      providerProfileId: 'prv_test'
+    }, 'chat');
+    const secondTask = await createResearchTask(settings, {
+      projectId: project.id,
+      userPrompt: '核实第二段说法',
+      contextMarkdown: '第二段上下文。',
+      title: '第二份资料',
+      providerProfileId: 'prv_test'
+    }, 'chat');
+    await Promise.all([
+      completeResearchTask(settings, {
+        projectId: project.id,
+        taskId: firstTask.id,
+        resultMarkdown: '## 第一份并发候选资料'
+      }),
+      completeResearchTask(settings, {
+        projectId: project.id,
+        taskId: secondTask.id,
+        resultMarkdown: '## 第二份并发候选资料'
+      })
+    ]);
+
+    const results = await Promise.allSettled([
+      appendTaskResultToDocument(settings, { projectId: project.id, taskId: firstTask.id, summary: '采纳第一份资料' }),
+      appendTaskResultToDocument(settings, { projectId: project.id, taskId: secondTask.id, summary: '采纳第二份资料' })
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(2);
+    const document = await readProjectDocument(settings, project.id);
+    expect(document.content.match(/第一份并发候选资料/g)).toHaveLength(1);
+    expect(document.content.match(/第二份并发候选资料/g)).toHaveLength(1);
+    const tasks = await readProjectTasks(settings, project.id);
+    const firstWriteIntentPath = tasks.find((task) => task.id === firstTask.id)?.writeIntentPath;
+    const secondWriteIntentPath = tasks.find((task) => task.id === secondTask.id)?.writeIntentPath;
+    expect(firstWriteIntentPath).toMatch(/write-journal\/applied\/wit_.+\.json$/);
+    expect(secondWriteIntentPath).toMatch(/write-journal\/applied\/wit_.+\.json$/);
+    expect(firstWriteIntentPath).not.toBe(secondWriteIntentPath);
+    const projectRoot = path.join(tempDir, project.projectPath);
+    const journalRoot = path.join(projectRoot, '.podcast-artist', 'write-journal');
+    const [pending, applying, applied, failed] = await Promise.all(
+      ['pending', 'applying', 'applied', 'failed'].map((status) => readdir(path.join(journalRoot, status)))
+    );
+    expect(applied).toHaveLength(2);
+    expect(pending).toHaveLength(0);
+    expect(applying).toHaveLength(0);
+    expect(failed).toHaveLength(0);
   });
 
   it('creates audio edit plans with two default tracks and can add more tracks', async () => {

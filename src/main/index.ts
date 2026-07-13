@@ -15,6 +15,7 @@ import type {
   GenerateAudioPeaksInput,
   InsertAudioGapInput,
   ProviderProfilesFile,
+  ReadResearchTaskResultInput,
   RippleDeleteAudioClipInput,
   UpdateAudioTrackInput,
   UpdateAudioClipTimingInput
@@ -27,7 +28,6 @@ import {
   analyzeAudioAsset,
   appendTaskResultToDocument,
   createAudioTrackInEditPlan,
-  createResearchTask,
   createProject,
   ensureWorkspace,
   exportAudioEditPlan,
@@ -40,11 +40,13 @@ import {
   readProjectLibrary,
   readProjectDocument,
   readProjectTasks,
+  readResearchTaskResult,
   rippleDeleteAudioClip,
   updateAudioTrackInEditPlan,
   deleteAudioTrackInEditPlan,
   updateAudioClipTiming
 } from './services/workspace';
+import { startResearchTask } from './services/researchTaskRunner';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -175,13 +177,22 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('task:createResearchTask', async (_event, input: CreateResearchTaskInput) => {
-    const { settings } = await ensureAppConfig();
-    return createResearchTask(settings, input);
+    const { settings, providers } = await ensureAppConfig();
+    const started = await startResearchTask(settings, providers, input);
+    void started.completion.catch((completionError) => {
+      console.error(`Research task completion failed for ${started.task.id}:`, completionError);
+    });
+    return started.task;
   });
 
   ipcMain.handle('task:readProjectTasks', async (_event, projectId: string) => {
     const { settings } = await ensureAppConfig();
     return readProjectTasks(settings, projectId);
+  });
+
+  ipcMain.handle('task:readResearchTaskResult', async (_event, input: ReadResearchTaskResultInput) => {
+    const { settings } = await ensureAppConfig();
+    return readResearchTaskResult(settings, input);
   });
 
   ipcMain.handle('task:appendResultToDocument', async (_event, input: AppendTaskResultInput) => {

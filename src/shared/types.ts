@@ -172,7 +172,6 @@ export interface CreateMarkdownAppendIntentInput {
   projectId: string;
   markdown: string;
   summary: string;
-  sourceTaskId?: string | null;
 }
 
 export interface ProjectDocument {
@@ -225,9 +224,29 @@ export interface CreateResearchTaskInput {
   title: string;
   userPrompt: string;
   contextMarkdown: string;
-  resultMarkdown: string;
-  segmentId?: string | null;
   providerProfileId?: string | null;
+}
+
+export interface CompleteResearchTaskInput {
+  projectId: string;
+  taskId: string;
+  resultMarkdown: string;
+}
+
+export interface FailResearchTaskInput {
+  projectId: string;
+  taskId: string;
+  error: string;
+}
+
+export interface ReadResearchTaskResultInput {
+  projectId: string;
+  taskId: string;
+}
+
+export interface ResearchTaskResult {
+  taskId: string;
+  resultMarkdown: string;
 }
 
 export interface AppendTaskResultInput {

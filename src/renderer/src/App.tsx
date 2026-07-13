@@ -39,7 +39,8 @@ import type {
   ProjectDocument,
   ProjectSummary,
   ProviderProfile,
-  ProviderProfilesFile
+  ProviderProfilesFile,
+  ResearchTaskResult
 } from '../../shared/types';
 import { getActiveTimelineClipPlaybacks } from './audioTimeline';
 import { podcastArtistApi } from './apiClient';
@@ -1776,17 +1777,49 @@ function DocumentsView({
 }): ReactElement {
   const currentProjectId = selectedProjectId;
   const currentProject = state.workspace.projects.find((project) => project.id === currentProjectId) ?? null;
+  const researchProfiles = useMemo(
+    () =>
+      state.providers.profiles.filter(
+        (profile) => (profile.kind === 'chat' || profile.kind === 'research') && profile.capabilities.includes('research')
+      ),
+    [state.providers.profiles]
+  );
+  const manuscriptReaderRef = useRef<HTMLElement | null>(null);
   const [document, setDocument] = useState<ProjectDocument | null>(null);
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [appendDraft, setAppendDraft] = useState('');
   const [taskPrompt, setTaskPrompt] = useState('核实这段资料，并整理成可插入文稿的 Markdown。');
   const [taskContext, setTaskContext] = useState('');
-  const [taskResult, setTaskResult] = useState('');
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskResult, setSelectedTaskResult] = useState<ResearchTaskResult | null>(null);
+  const [isSubmittingTask, setIsSubmittingTask] = useState(false);
+  const [adoptingTaskId, setAdoptingTaskId] = useState<string | null>(null);
+  const [selectedProviderProfileId, setSelectedProviderProfileId] = useState(
+    () =>
+      researchProfiles.find((profile) => profile.id === state.settings.defaultProviderProfileId)?.id ??
+      researchProfiles[0]?.id ??
+      ''
+  );
   const [isLoadingDocument, setIsLoadingDocument] = useState(false);
   const [localNotice, setLocalNotice] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+  const hasRunningTasks = tasks.some((task) => task.status === 'running');
+  const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null;
 
   useEffect(() => {
+    setSelectedProviderProfileId((current) => {
+      if (researchProfiles.some((profile) => profile.id === current)) return current;
+      return (
+        researchProfiles.find((profile) => profile.id === state.settings.defaultProviderProfileId)?.id ??
+        researchProfiles[0]?.id ??
+        ''
+      );
+    });
+  }, [researchProfiles, state.settings.defaultProviderProfileId]);
+
+  useEffect(() => {
+    setSelectedTaskId(null);
+    setSelectedTaskResult(null);
     if (!currentProjectId) {
       setDocument(null);
       setTasks([]);
@@ -1813,6 +1846,27 @@ function DocumentsView({
       isMounted = false;
     };
   }, [currentProjectId]);
+
+  useEffect(() => {
+    if (!currentProjectId || !hasRunningTasks) return;
+
+    let isMounted = true;
+    const intervalId = window.setInterval(() => {
+      void podcastArtistApi
+        .readProjectTasks(currentProjectId)
+        .then((nextTasks) => {
+          if (isMounted) setTasks(nextTasks);
+        })
+        .catch((readError) => {
+          if (isMounted) setLocalError(toErrorMessage(readError));
+        });
+    }, 750);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, [currentProjectId, hasRunningTasks]);
 
   async function handleAppendMarkdown(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -1844,33 +1898,89 @@ function DocumentsView({
 
   async function handleCreateResearchTask(event: FormEvent): Promise<void> {
     event.preventDefault();
-    if (!currentProjectId || !taskPrompt.trim() || !taskResult.trim()) return;
+    if (!currentProjectId || !taskPrompt.trim() || !selectedProviderProfileId) return;
 
-    setIsLoadingDocument(true);
+    setIsSubmittingTask(true);
     setLocalNotice(null);
     setLocalError(null);
     try {
       const task = await podcastArtistApi.createResearchTask({
         projectId: currentProjectId,
         title: taskPrompt.trim().slice(0, 48),
-        userPrompt: taskPrompt,
-        contextMarkdown: taskContext || document?.content || '',
-        resultMarkdown: taskResult
+        userPrompt: taskPrompt.trim(),
+        contextMarkdown: taskContext.trim() || document?.content || '',
+        providerProfileId: selectedProviderProfileId
       });
+      setTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
+      setLocalNotice('资料任务已启动，可以继续阅读或发起下一条任务。');
+    } catch (taskError) {
+      setLocalError(toErrorMessage(taskError));
+    } finally {
+      setIsSubmittingTask(false);
+    }
+  }
+
+  function captureSelectedManuscript(): void {
+    const manuscriptReader = manuscriptReaderRef.current;
+    const selection = window.getSelection();
+    const selectedText = selection?.toString().trim() ?? '';
+    const isInsideManuscript = Boolean(
+      manuscriptReader &&
+        selection?.rangeCount &&
+        selection.anchorNode &&
+        selection.focusNode &&
+        manuscriptReader.contains(selection.anchorNode) &&
+        manuscriptReader.contains(selection.focusNode)
+    );
+
+    if (!selectedText || !isInsideManuscript) {
+      setLocalNotice(null);
+      setLocalError('请先在文稿中选中一段文字。');
+      return;
+    }
+
+    setTaskContext(selectedText);
+    setLocalError(null);
+    setLocalNotice('已将选中的文稿放入任务上下文。');
+  }
+
+  async function loadTaskResult(task: AgentTask): Promise<void> {
+    if (!currentProjectId || task.status !== 'completed') return;
+
+    setLocalNotice(null);
+    setLocalError(null);
+    try {
+      const result = await podcastArtistApi.readResearchTaskResult({
+        projectId: currentProjectId,
+        taskId: task.id
+      });
+      setSelectedTaskId(task.id);
+      setSelectedTaskResult(result);
+    } catch (readError) {
+      setLocalError(toErrorMessage(readError));
+    }
+  }
+
+  async function adoptTaskResult(task: AgentTask): Promise<void> {
+    if (!currentProjectId || task.status !== 'completed' || task.writeIntentPath || adoptingTaskId) return;
+
+    setAdoptingTaskId(task.id);
+    setLocalNotice(null);
+    setLocalError(null);
+    try {
       const result = await podcastArtistApi.appendTaskResultToDocument({
         projectId: currentProjectId,
         taskId: task.id,
         summary: '采纳资料任务结果'
       });
       setDocument(result.document);
-      setTaskResult('');
       setTasks(await podcastArtistApi.readProjectTasks(currentProjectId));
       await onWorkspaceRefresh();
-      setLocalNotice('资料任务已完成，结果已保存到文稿。');
-    } catch (taskError) {
-      setLocalError(toErrorMessage(taskError));
+      setLocalNotice('资料候选已采纳到文稿。');
+    } catch (adoptError) {
+      setLocalError(toErrorMessage(adoptError));
     } finally {
-      setIsLoadingDocument(false);
+      setAdoptingTaskId(null);
     }
   }
 
@@ -1895,7 +2005,7 @@ function DocumentsView({
             {localError ? <div className="notice error compact">{localError}</div> : null}
 
             <div className="manuscript-frame">
-              <article className="markdown-reader manuscript-reader" aria-label="episode.md 预览">
+              <article ref={manuscriptReaderRef} className="markdown-reader manuscript-reader" aria-label="episode.md 预览">
                 {isLoadingDocument && !document ? <p>正在读取 episode.md...</p> : renderMarkdownPreview(document?.content ?? '')}
               </article>
             </div>
@@ -1943,7 +2053,15 @@ function DocumentsView({
                 <p>{task.userPrompt}</p>
                 <div className="task-ledger-meta">
                   <span>{formatTaskTimestamp(task.createdAt)}</span>
-                  <span>{task.writeIntentPath ? '已采纳到文稿' : '未采纳'}</span>
+                  <span>{task.writeIntentPath ? '已采纳' : '未采纳'}</span>
+                </div>
+                {task.status === 'failed' && task.error ? <p className="task-ledger-error">{task.error}</p> : null}
+                <div className="task-ledger-actions">
+                  {task.status === 'completed' ? (
+                    <button className="secondary-button" type="button" onClick={() => void loadTaskResult(task)}>
+                      查看结果
+                    </button>
+                  ) : null}
                 </div>
               </article>
             ))
@@ -1954,7 +2072,35 @@ function DocumentsView({
             </div>
           )}
         </div>
+        {selectedTask && selectedTaskResult?.taskId === selectedTask.id ? (
+          <section className="task-result-candidate" aria-label="资料候选结果">
+            <div className="task-ledger-title">
+              <strong>{selectedTask.title}</strong>
+              <span>{selectedTask.writeIntentPath ? '已采纳' : '待采纳'}</span>
+            </div>
+            <div className="task-result-content">{renderMarkdownPreview(selectedTaskResult.resultMarkdown)}</div>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => void adoptTaskResult(selectedTask)}
+              disabled={Boolean(selectedTask.writeIntentPath) || adoptingTaskId === selectedTask.id}
+            >
+              {selectedTask.writeIntentPath ? '已采纳' : adoptingTaskId === selectedTask.id ? '正在采纳...' : '采纳到文稿'}
+            </button>
+          </section>
+        ) : null}
         <div className="task-form-grid">
+          <label className="field">
+            <span>资料服务</span>
+            <select value={selectedProviderProfileId} onChange={(event) => setSelectedProviderProfileId(event.target.value)}>
+              {researchProfiles.length ? null : <option value="">没有可用的资料服务</option>}
+              {researchProfiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.displayName}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="field">
             <span>任务指令</span>
             <textarea value={taskPrompt} onChange={(event) => setTaskPrompt(event.target.value)} />
@@ -1967,18 +2113,13 @@ function DocumentsView({
               placeholder="留空时使用当前 episode.md 内容作为 context.md。"
             />
           </label>
-          <label className="field span-2">
-            <span>任务结果 Markdown</span>
-            <textarea
-              value={taskResult}
-              onChange={(event) => setTaskResult(event.target.value)}
-              placeholder="粘贴资料结果 Markdown。提交后会先写入本地任务缓存，再采纳到 episode.md。"
-            />
-          </label>
+          <button type="button" className="secondary-button" onClick={captureSelectedManuscript}>
+            使用选中文稿
+          </button>
         </div>
-        <button className="primary-button" type="submit" disabled={!currentProjectId || !taskPrompt.trim() || !taskResult.trim() || isLoadingDocument}>
+        <button className="primary-button" type="submit" disabled={!currentProjectId || isSubmittingTask || !selectedProviderProfileId || !taskPrompt.trim()}>
           <Send size={16} />
-          创建任务并采纳
+          {isSubmittingTask ? '正在启动...' : '启动资料任务'}
         </button>
       </form>
     </section>
