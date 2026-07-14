@@ -372,7 +372,7 @@ textarea {
   display: grid;
   place-items: center;
   padding: var(--space-6);
-  background: oklch(0.11 0.012 142 / 0.68);
+  background: color-mix(in oklch, var(--bg), transparent 32%);
 }
 
 .modal-panel {
@@ -524,6 +524,11 @@ dd {
   border-color: var(--border-strong);
   background: var(--surface-2);
   color: var(--text);
+}
+
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .modal-actions .primary-button,
@@ -885,7 +890,7 @@ dd {
 .audio-layout {
   overflow: hidden;
   border-color: var(--line);
-  background: var(--ink);
+  background: var(--bg);
 }
 
 .document-main-panel,
@@ -1673,6 +1678,11 @@ dd {
 .timeline-clip:disabled {
   cursor: default;
   opacity: 0.72;
+}
+
+.timeline-clip:not(.selected):hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--border-strong), var(--accent) 20%);
+  background: var(--surface-3);
 }
 
 .timeline-clip.selected {
