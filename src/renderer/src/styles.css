@@ -1,19 +1,19 @@
 :root {
   color-scheme: dark;
-  --bg: #080a08;
-  --surface: #101410;
-  --surface-2: #151a15;
-  --surface-3: #1b211b;
-  --surface-elevated: #202820;
-  --ink: oklch(0.155 0.007 95);
-  --line: oklch(0.58 0.012 95 / 0.52);
-  --line-strong: oklch(0.72 0.016 95 / 0.6);
-  --text: #f4f7ec;
-  --muted: #aab2a1;
-  --muted-2: #788173;
-  --border: #303a30;
-  --border-strong: #465344;
-  --accent: oklch(0.86 0.012 95);
+  --bg: #0b0e14;
+  --surface: #12161f;
+  --surface-2: #171c27;
+  --surface-3: #1c222e;
+  --surface-elevated: #232a37;
+  --ink: #0e1118;
+  --line: rgb(73 82 100 / 0.52);
+  --line-strong: rgb(100 112 133 / 0.6);
+  --text: #e6eaf2;
+  --muted: #a6adbb;
+  --muted-2: #70798a;
+  --border: #252b36;
+  --border-strong: #384151;
+  --accent: #d8dee9;
   --signal: oklch(0.78 0.085 142);
   --signal-soft: oklch(0.36 0.05 142 / 0.32);
   --signal-fill: oklch(0.24 0.028 142);
@@ -36,7 +36,8 @@
   --font-title: 1rem;
   --font-page: 1.5rem;
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    "OPPO Sans", "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 * {
@@ -47,7 +48,7 @@ body {
   margin: 0;
   min-width: 1120px;
   background:
-    linear-gradient(180deg, #0b0e0b 0%, var(--bg) 280px),
+    linear-gradient(180deg, var(--surface) 0%, var(--bg) 280px),
     var(--bg);
   color: var(--text);
   font-size: var(--font-body);
@@ -77,9 +78,9 @@ textarea {
   place-items: center;
   width: 44px;
   height: 44px;
-  border: 1px solid color-mix(in oklch, var(--signal), transparent 48%);
-  background: var(--signal-soft);
-  color: var(--signal);
+  border: 1px solid color-mix(in oklch, var(--accent), transparent 58%);
+  background: color-mix(in oklch, var(--accent), transparent 90%);
+  color: var(--accent);
 }
 
 .app-shell {
@@ -93,7 +94,7 @@ textarea {
   flex-direction: column;
   gap: var(--space-6);
   padding: var(--space-5);
-  background: #0b0e0b;
+  background: var(--bg);
   border-right: 1px solid var(--border);
 }
 
@@ -162,9 +163,9 @@ textarea {
 
 .nav button.active,
 .nav button:hover {
-  border-color: color-mix(in oklch, var(--signal), transparent 70%);
-  background: color-mix(in oklch, var(--signal-soft), var(--surface) 34%);
-  color: var(--signal);
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  color: var(--accent);
 }
 
 .project-sidebar {
@@ -191,9 +192,9 @@ textarea {
 }
 
 .project-back-button:hover {
-  border-color: color-mix(in oklch, var(--signal), transparent 68%);
-  background: color-mix(in oklch, var(--signal-soft), var(--surface) 42%);
-  color: var(--signal);
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  color: var(--accent);
 }
 
 .sidebar-section-label {
@@ -257,11 +258,11 @@ textarea {
 
 .eyebrow,
 .panel-kicker {
-  color: var(--signal);
+  color: var(--muted);
   font-size: var(--font-caption);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .icon-button {
@@ -371,7 +372,7 @@ textarea {
   display: grid;
   place-items: center;
   padding: var(--space-6);
-  background: oklch(0.11 0.012 142 / 0.68);
+  background: color-mix(in oklch, var(--bg), transparent 32%);
 }
 
 .modal-panel {
@@ -410,8 +411,8 @@ textarea {
 dt {
   color: var(--muted);
   font-size: 0.6875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 dd {
@@ -443,7 +444,7 @@ dd {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #0d100d;
+  background: var(--bg);
   color: var(--text);
   font-size: var(--font-body);
   outline: none;
@@ -465,7 +466,7 @@ dd {
 .field input:focus,
 .field select:focus,
 .field textarea:focus {
-  border-color: color-mix(in oklch, var(--signal), transparent 30%);
+  border-color: color-mix(in oklch, var(--accent), transparent 36%);
 }
 
 .primary-button,
@@ -476,9 +477,9 @@ dd {
   gap: var(--space-2);
   min-height: 40px;
   padding: 0 14px;
-  border-color: color-mix(in oklch, var(--signal), transparent 58%);
-  background: color-mix(in oklch, var(--signal-fill), var(--surface) 22%);
-  color: color-mix(in oklch, var(--signal), white 18%);
+  border-color: color-mix(in oklch, var(--accent), transparent 32%);
+  background: var(--accent);
+  color: var(--ink);
   border-radius: 8px;
   font-size: var(--font-small);
   font-weight: 550;
@@ -495,15 +496,15 @@ dd {
 }
 
 .primary-button:hover:not(:disabled) {
-  border-color: color-mix(in oklch, var(--signal), transparent 38%);
-  background: color-mix(in oklch, var(--signal-fill), var(--surface) 8%);
-  color: color-mix(in oklch, var(--signal), white 24%);
+  border-color: var(--text);
+  background: color-mix(in oklch, var(--accent), white 10%);
+  color: var(--ink);
 }
 
 .primary-button:focus-visible,
 .secondary-button:focus-visible {
-  border-color: color-mix(in oklch, var(--signal), transparent 28%);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--signal-soft), transparent 18%);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent), transparent 78%);
 }
 
 .primary-button:disabled {
@@ -515,13 +516,19 @@ dd {
   min-height: 34px;
   padding: 0 12px;
   border-color: var(--border);
-  background: #0d100d;
-  color: var(--signal);
+  background: var(--bg);
+  color: var(--muted);
 }
 
 .secondary-button:hover:not(:disabled) {
-  border-color: color-mix(in oklch, var(--signal), transparent 52%);
-  background: color-mix(in oklch, var(--signal), transparent 88%);
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .modal-actions .primary-button,
@@ -539,15 +546,15 @@ dd {
 }
 
 .modal-actions .secondary-button:hover:not(:disabled) {
-  border-color: color-mix(in oklch, var(--signal), transparent 58%);
-  background: color-mix(in oklch, var(--signal-fill), var(--surface) 46%);
-  color: color-mix(in oklch, var(--signal), var(--text) 26%);
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text);
 }
 
 .modal-actions .primary-button {
-  border-color: color-mix(in oklch, var(--signal), transparent 46%);
-  background: color-mix(in oklch, var(--signal-fill), var(--surface) 18%);
-  color: color-mix(in oklch, var(--signal), white 20%);
+  border-color: color-mix(in oklch, var(--accent), transparent 32%);
+  background: var(--accent);
+  color: var(--ink);
 }
 
 .row-actions {
@@ -639,7 +646,7 @@ dd {
   padding: 16px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #0b0e0b;
+  background: var(--bg);
   color: var(--text);
   font-family: "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", monospace;
   font-size: var(--font-small);
@@ -693,8 +700,8 @@ dd {
 }
 
 .asset-row.selected {
-  border-color: color-mix(in oklch, var(--signal), transparent 45%);
-  background: color-mix(in oklch, var(--surface-2), var(--signal) 8%);
+  border-color: color-mix(in oklch, var(--accent), transparent 48%);
+  background: var(--surface-2);
 }
 
 .asset-row > div:first-child {
@@ -856,8 +863,8 @@ dd {
 }
 
 .notice.preview {
-  border-color: color-mix(in oklch, var(--signal), transparent 65%);
-  color: var(--signal);
+  border-color: color-mix(in oklch, var(--reference), transparent 65%);
+  color: var(--reference);
 }
 
 .toast-stack {
@@ -883,7 +890,7 @@ dd {
 .audio-layout {
   overflow: hidden;
   border-color: var(--line);
-  background: var(--ink);
+  background: var(--bg);
 }
 
 .document-main-panel,
@@ -898,7 +905,7 @@ dd {
   margin-bottom: 0;
   padding: 0 var(--space-4);
   border-bottom: 1px solid var(--line);
-  background: oklch(0.145 0.006 95);
+  background: var(--surface);
 }
 
 .document-main-panel .panel-header h2,
@@ -914,12 +921,12 @@ dd {
 .document-meta {
   padding: 10px var(--space-4);
   border-bottom: 1px solid var(--line);
-  background: oklch(0.17 0.007 95);
+  background: var(--surface-2);
 }
 
 .document-meta span {
   border-color: var(--line);
-  background: oklch(0.215 0.008 95);
+  background: var(--surface-3);
 }
 
 .document-main-panel .notice,
@@ -930,7 +937,7 @@ dd {
 .manuscript-frame {
   display: block;
   min-height: min(58vh, 620px);
-  background: oklch(0.18 0.007 95);
+  background: var(--surface-2);
 }
 
 .markdown-reader.manuscript-reader {
@@ -941,9 +948,10 @@ dd {
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: oklch(0.88 0.008 95);
+  color: color-mix(in oklch, var(--text), var(--muted) 18%);
   font-family:
-    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+    "OPPO Sans", "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 1rem;
   line-height: 1.92;
   white-space: normal;
@@ -999,7 +1007,7 @@ dd {
   gap: var(--space-3);
   padding: var(--space-4);
   border-top: 1px solid var(--line);
-  background: oklch(0.145 0.006 95);
+  background: var(--surface);
 }
 
 .append-form .field {
@@ -1010,7 +1018,7 @@ dd {
   min-height: 96px;
   max-height: 180px;
   border-color: var(--line);
-  background: oklch(0.115 0.006 95);
+  background: var(--bg);
 }
 
 .task-panel {
@@ -1027,7 +1035,7 @@ dd {
 .task-ledger-empty {
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: oklch(0.18 0.007 95);
+  background: var(--surface-2);
 }
 
 .task-ledger-row {
@@ -1138,7 +1146,7 @@ dd {
   padding: var(--space-3);
   border: 1px solid color-mix(in oklch, var(--reference), transparent 62%);
   border-radius: 6px;
-  background: color-mix(in oklch, var(--reference-soft), oklch(0.145 0.006 95) 76%);
+  background: color-mix(in oklch, var(--reference-soft), var(--surface) 76%);
 }
 
 .task-result-candidate .task-ledger-title span {
@@ -1156,7 +1164,7 @@ dd {
   padding: var(--space-3);
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: oklch(0.115 0.006 95);
+  background: var(--bg);
   color: var(--text);
   font-size: var(--font-small);
   line-height: 1.7;
@@ -1186,7 +1194,7 @@ dd {
 .task-panel textarea {
   min-height: 116px;
   border-color: var(--line);
-  background: oklch(0.115 0.006 95);
+  background: var(--bg);
 }
 
 .task-panel .task-form-grid > .secondary-button {
@@ -1197,7 +1205,7 @@ dd {
 .task-panel .span-2 textarea {
   min-height: 170px;
   border-color: color-mix(in oklch, var(--reference), transparent 62%);
-  background: color-mix(in oklch, var(--reference-soft), oklch(0.115 0.006 95) 76%);
+  background: color-mix(in oklch, var(--reference-soft), var(--bg) 76%);
 }
 
 .task-panel > .primary-button {
@@ -1221,7 +1229,7 @@ dd {
   border: 0;
   border-bottom: 1px solid var(--line);
   border-radius: 0;
-  background: oklch(0.145 0.006 95);
+  background: var(--surface);
 }
 
 .audio-command-bar .secondary-button,
@@ -1261,16 +1269,23 @@ dd {
   width: 30px;
   height: 30px;
   padding: 0;
-  border: 1px solid color-mix(in oklch, var(--signal), transparent 46%);
+  border: 1px solid var(--line-strong);
   border-radius: 6px;
-  background: color-mix(in oklch, var(--signal-fill), var(--surface) 14%);
-  color: color-mix(in oklch, var(--signal), white 10%);
+  background: var(--surface-2);
+  color: var(--muted);
   cursor: pointer;
 }
 
 .timeline-transport-button:hover:not(:disabled) {
-  border-color: color-mix(in oklch, var(--signal), transparent 22%);
-  background: color-mix(in oklch, var(--signal-fill), var(--surface) 4%);
+  border-color: var(--border-strong);
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.timeline-transport-button[aria-pressed="true"] {
+  border-color: color-mix(in oklch, var(--signal), transparent 30%);
+  background: color-mix(in oklch, var(--signal-fill), var(--surface-2) 24%);
+  color: var(--signal);
 }
 
 .timeline-transport-button:disabled {
@@ -1314,9 +1329,9 @@ dd {
 }
 
 .clip-trim-toolbar button:hover:not(:disabled) {
-  border-color: color-mix(in oklch, var(--signal), transparent 58%);
-  background: color-mix(in oklch, var(--signal-fill), transparent 44%);
-  color: color-mix(in oklch, var(--signal), white 14%);
+  border-color: var(--border-strong);
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 .clip-trim-toolbar button:disabled {
@@ -1350,14 +1365,15 @@ dd {
   padding: 0;
   border: 1px solid var(--line-strong);
   border-radius: 6px;
-  background: oklch(0.17 0.007 95);
+  background: var(--surface-2);
   color: var(--muted);
   cursor: pointer;
 }
 
 .timeline-zoom-button:hover:not(:disabled) {
-  border-color: color-mix(in oklch, var(--signal), transparent 52%);
-  color: var(--signal);
+  border-color: var(--border-strong);
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 .timeline-zoom-button:disabled {
@@ -1372,7 +1388,7 @@ dd {
   min-width: 0;
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--line);
-  background: oklch(0.13 0.006 95);
+  background: var(--surface);
 }
 
 .audio-asset-chip {
@@ -1381,7 +1397,7 @@ dd {
   padding: 8px 11px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: oklch(0.17 0.007 95);
+  background: var(--surface-2);
   color: var(--text);
   cursor: grab;
   font-size: var(--font-caption);
@@ -1395,27 +1411,27 @@ dd {
 }
 
 .audio-asset-chip.selected {
-  border-color: color-mix(in oklch, var(--signal), transparent 36%);
-  background: color-mix(in oklch, var(--signal-fill), var(--surface) 22%);
-  color: color-mix(in oklch, var(--signal), white 18%);
+  border-color: color-mix(in oklch, var(--accent), transparent 42%);
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 .audio-asset-chip:focus-visible {
-  border-color: color-mix(in oklch, var(--signal), transparent 36%);
+  border-color: color-mix(in oklch, var(--accent), transparent 34%);
 }
 
 .audio-timeline-workspace {
   display: grid;
   min-height: 320px;
   border-top: 1px solid var(--line);
-  background: oklch(0.12 0.006 95);
+  background: var(--bg);
 }
 
 .timeline-panel {
   min-width: 0;
   overflow-x: auto;
   padding: 0;
-  background: oklch(0.12 0.006 95);
+  background: var(--bg);
   overscroll-behavior-x: contain;
 }
 
@@ -1444,20 +1460,18 @@ dd {
   bottom: 0;
   left: 0;
   width: 1px;
-  background: color-mix(in oklch, var(--signal), white 8%);
-  box-shadow: 0 0 12px color-mix(in oklch, var(--signal), transparent 42%);
+  background: var(--signal);
   content: "";
 }
 
 .timeline-playhead::after {
   position: absolute;
-  top: -7px;
-  left: -4px;
-  width: 9px;
-  height: 9px;
+  top: -6px;
+  left: -3px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: color-mix(in oklch, var(--signal), white 10%);
-  box-shadow: 0 0 10px color-mix(in oklch, var(--signal), transparent 45%);
+  background: var(--signal);
   content: "";
 }
 
@@ -1495,7 +1509,7 @@ dd {
 .audio-empty-workflow {
   min-height: 320px;
   border-top: 1px solid var(--line);
-  background: oklch(0.12 0.006 95);
+  background: var(--bg);
 }
 
 .timeline-ruler {
@@ -1513,7 +1527,7 @@ dd {
   left: 0;
   z-index: 4;
   border-left: 0;
-  background: oklch(0.12 0.006 95);
+  background: var(--bg);
 }
 
 .timeline-ruler-ticks {
@@ -1552,7 +1566,7 @@ dd {
   gap: var(--space-2);
   padding: var(--space-3);
   border-right: 1px solid var(--line);
-  background: oklch(0.155 0.007 95);
+  background: var(--surface);
 }
 
 .timeline-track-name-input {
@@ -1568,7 +1582,7 @@ dd {
 }
 
 .timeline-track-name-input:focus-visible {
-  outline: 1px solid color-mix(in oklch, var(--signal), transparent 42%);
+  outline: 1px solid color-mix(in oklch, var(--accent), transparent 34%);
   outline-offset: 4px;
 }
 
@@ -1585,14 +1599,14 @@ dd {
   padding: 0;
   border: 1px solid var(--line-strong);
   border-radius: 5px;
-  background: oklch(0.17 0.007 95);
+  background: var(--surface-2);
   color: var(--muted);
   cursor: pointer;
 }
 
 .timeline-track-icon-button.active {
-  border-color: color-mix(in oklch, var(--signal), transparent 36%);
-  color: var(--signal);
+  border-color: color-mix(in oklch, var(--accent), transparent 42%);
+  color: var(--accent);
 }
 
 .timeline-track-icon-button.danger {
@@ -1653,9 +1667,9 @@ dd {
   height: 100%;
   overflow: hidden;
   padding: 0;
-  border: 1px solid color-mix(in oklch, var(--signal), transparent 42%);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
-  background: var(--signal-fill);
+  background: var(--surface-2);
   color: var(--text);
   cursor: pointer;
   text-align: left;
@@ -1666,16 +1680,19 @@ dd {
   opacity: 0.72;
 }
 
+.timeline-clip:not(.selected):hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--border-strong), var(--accent) 20%);
+  background: var(--surface-3);
+}
+
 .timeline-clip.selected {
-  border-color: color-mix(in oklch, var(--signal), transparent 12%);
-  background: color-mix(in oklch, var(--signal-fill), var(--surface) 6%);
-  box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--signal), transparent 22%),
-    0 10px 22px color-mix(in oklch, black, transparent 70%);
+  border-color: color-mix(in oklch, var(--signal), transparent 18%);
+  background: var(--surface-3);
+  box-shadow: 0 10px 22px color-mix(in oklch, black, transparent 70%);
 }
 
 .timeline-clip:focus-visible {
-  outline: 2px solid color-mix(in oklch, var(--signal), transparent 18%);
+  outline: 2px solid color-mix(in oklch, var(--accent), transparent 18%);
   outline-offset: 2px;
 }
 
@@ -1684,12 +1701,12 @@ dd {
   z-index: 1;
   display: inline-block;
   max-width: calc(100% - 36px);
-  margin: 7px 32px 0 var(--space-2);
+  margin: 6px 32px 0 var(--space-2);
   padding: 2px 6px;
   overflow: hidden;
   border-radius: 4px;
-  background: color-mix(in oklch, var(--signal-fill), var(--surface) 18%);
-  color: oklch(0.94 0.008 95);
+  background: color-mix(in oklch, var(--surface-elevated), transparent 18%);
+  color: var(--text);
   font-size: 0.6875rem;
   font-weight: 600;
   line-height: 1.2;
@@ -1699,11 +1716,11 @@ dd {
 
 .timeline-clip-waveform {
   position: absolute;
-  inset: 32px 10px 9px;
+  inset: 28px 10px 8px;
   display: flex;
   align-items: center;
   gap: 1px;
-  opacity: 0.92;
+  opacity: 0.94;
 }
 
 .timeline-clip-waveform span {
@@ -1711,8 +1728,11 @@ dd {
   min-width: 1px;
   padding: 0;
   border-radius: 999px;
-  background: color-mix(in oklch, var(--signal), white 3%);
-  box-shadow: 0 0 0 1px color-mix(in oklch, var(--signal), transparent 86%);
+  background: color-mix(in oklch, var(--muted), transparent 18%);
+}
+
+.timeline-clip.selected .timeline-clip-waveform span {
+  background: var(--signal);
 }
 
 .timeline-clip-remove {
