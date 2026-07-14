@@ -1264,16 +1264,23 @@ dd {
   width: 30px;
   height: 30px;
   padding: 0;
-  border: 1px solid color-mix(in oklch, var(--signal), transparent 46%);
+  border: 1px solid var(--line-strong);
   border-radius: 6px;
-  background: color-mix(in oklch, var(--signal-fill), var(--surface) 14%);
-  color: color-mix(in oklch, var(--signal), white 10%);
+  background: var(--surface-2);
+  color: var(--muted);
   cursor: pointer;
 }
 
 .timeline-transport-button:hover:not(:disabled) {
-  border-color: color-mix(in oklch, var(--signal), transparent 22%);
-  background: color-mix(in oklch, var(--signal-fill), var(--surface) 4%);
+  border-color: var(--border-strong);
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.timeline-transport-button[aria-pressed="true"] {
+  border-color: color-mix(in oklch, var(--signal), transparent 30%);
+  background: color-mix(in oklch, var(--signal-fill), var(--surface-2) 24%);
+  color: var(--signal);
 }
 
 .timeline-transport-button:disabled {
@@ -1317,9 +1324,9 @@ dd {
 }
 
 .clip-trim-toolbar button:hover:not(:disabled) {
-  border-color: color-mix(in oklch, var(--signal), transparent 58%);
-  background: color-mix(in oklch, var(--signal-fill), transparent 44%);
-  color: color-mix(in oklch, var(--signal), white 14%);
+  border-color: var(--border-strong);
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 .clip-trim-toolbar button:disabled {
@@ -1359,8 +1366,9 @@ dd {
 }
 
 .timeline-zoom-button:hover:not(:disabled) {
-  border-color: color-mix(in oklch, var(--signal), transparent 52%);
-  color: var(--signal);
+  border-color: var(--border-strong);
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 .timeline-zoom-button:disabled {
@@ -1398,13 +1406,13 @@ dd {
 }
 
 .audio-asset-chip.selected {
-  border-color: color-mix(in oklch, var(--signal), transparent 36%);
-  background: color-mix(in oklch, var(--signal-fill), var(--surface) 22%);
-  color: color-mix(in oklch, var(--signal), white 18%);
+  border-color: color-mix(in oklch, var(--accent), transparent 42%);
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 .audio-asset-chip:focus-visible {
-  border-color: color-mix(in oklch, var(--signal), transparent 36%);
+  border-color: color-mix(in oklch, var(--accent), transparent 34%);
 }
 
 .audio-timeline-workspace {
@@ -1447,20 +1455,18 @@ dd {
   bottom: 0;
   left: 0;
   width: 1px;
-  background: color-mix(in oklch, var(--signal), white 8%);
-  box-shadow: 0 0 12px color-mix(in oklch, var(--signal), transparent 42%);
+  background: var(--signal);
   content: "";
 }
 
 .timeline-playhead::after {
   position: absolute;
-  top: -7px;
-  left: -4px;
-  width: 9px;
-  height: 9px;
+  top: -6px;
+  left: -3px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: color-mix(in oklch, var(--signal), white 10%);
-  box-shadow: 0 0 10px color-mix(in oklch, var(--signal), transparent 45%);
+  background: var(--signal);
   content: "";
 }
 
@@ -1571,7 +1577,7 @@ dd {
 }
 
 .timeline-track-name-input:focus-visible {
-  outline: 1px solid color-mix(in oklch, var(--signal), transparent 42%);
+  outline: 1px solid color-mix(in oklch, var(--accent), transparent 34%);
   outline-offset: 4px;
 }
 
@@ -1594,8 +1600,8 @@ dd {
 }
 
 .timeline-track-icon-button.active {
-  border-color: color-mix(in oklch, var(--signal), transparent 36%);
-  color: var(--signal);
+  border-color: color-mix(in oklch, var(--accent), transparent 42%);
+  color: var(--accent);
 }
 
 .timeline-track-icon-button.danger {
@@ -1656,9 +1662,9 @@ dd {
   height: 100%;
   overflow: hidden;
   padding: 0;
-  border: 1px solid color-mix(in oklch, var(--signal), transparent 42%);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
-  background: var(--signal-fill);
+  background: var(--surface-2);
   color: var(--text);
   cursor: pointer;
   text-align: left;
@@ -1670,15 +1676,13 @@ dd {
 }
 
 .timeline-clip.selected {
-  border-color: color-mix(in oklch, var(--signal), transparent 12%);
-  background: color-mix(in oklch, var(--signal-fill), var(--surface) 6%);
-  box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--signal), transparent 22%),
-    0 10px 22px color-mix(in oklch, black, transparent 70%);
+  border-color: color-mix(in oklch, var(--signal), transparent 18%);
+  background: var(--surface-3);
+  box-shadow: 0 10px 22px color-mix(in oklch, black, transparent 70%);
 }
 
 .timeline-clip:focus-visible {
-  outline: 2px solid color-mix(in oklch, var(--signal), transparent 18%);
+  outline: 2px solid color-mix(in oklch, var(--accent), transparent 18%);
   outline-offset: 2px;
 }
 
@@ -1687,11 +1691,11 @@ dd {
   z-index: 1;
   display: inline-block;
   max-width: calc(100% - 36px);
-  margin: 7px 32px 0 var(--space-2);
+  margin: 6px 32px 0 var(--space-2);
   padding: 2px 6px;
   overflow: hidden;
   border-radius: 4px;
-  background: color-mix(in oklch, var(--signal-fill), var(--surface) 18%);
+  background: color-mix(in oklch, var(--surface-elevated), transparent 18%);
   color: var(--text);
   font-size: 0.6875rem;
   font-weight: 600;
@@ -1702,11 +1706,11 @@ dd {
 
 .timeline-clip-waveform {
   position: absolute;
-  inset: 32px 10px 9px;
+  inset: 28px 10px 8px;
   display: flex;
   align-items: center;
   gap: 1px;
-  opacity: 0.92;
+  opacity: 0.94;
 }
 
 .timeline-clip-waveform span {
@@ -1714,8 +1718,11 @@ dd {
   min-width: 1px;
   padding: 0;
   border-radius: 999px;
-  background: color-mix(in oklch, var(--signal), white 3%);
-  box-shadow: 0 0 0 1px color-mix(in oklch, var(--signal), transparent 86%);
+  background: color-mix(in oklch, var(--muted), transparent 18%);
+}
+
+.timeline-clip.selected .timeline-clip-waveform span {
+  background: var(--signal);
 }
 
 .timeline-clip-remove {

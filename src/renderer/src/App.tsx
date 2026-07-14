@@ -1504,6 +1504,7 @@ function AudioView({
             <div className="audio-command-left">
               <div className="timeline-transport" aria-label="时间线播放">
                 <button
+                  aria-pressed={isTimelinePlaying}
                   className="timeline-transport-button"
                   type="button"
                   onClick={handleToggleTimelinePlayback}
