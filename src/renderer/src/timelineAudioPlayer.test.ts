@@ -3,6 +3,24 @@ import type { AudioAssetPlaybackData, AudioEditPlan } from '../../shared/types';
 import { TimelineAudioPlayer } from './timelineAudioPlayer';
 
 describe('TimelineAudioPlayer', () => {
+  it('can activate the shared audio context before asynchronous media loading', async () => {
+    const harness = createHarness();
+    const player = new TimelineAudioPlayer(harness.dependencies);
+
+    player.activate();
+
+    expect(harness.context.resumeCount).toBe(1);
+  });
+
+  it('does not block playback preparation when audio context activation stays pending', async () => {
+    const harness = createHarness();
+    harness.context.resumeResult = new Promise(() => undefined);
+    const player = new TimelineAudioPlayer(harness.dependencies);
+
+    expect(player.activate()).toBeUndefined();
+    expect(harness.context.resumeCount).toBe(1);
+  });
+
   it('preloads clip media and starts active tracks from one timeline position', async () => {
     const harness = createHarness();
     const plan = createPlan([
@@ -31,6 +49,24 @@ describe('TimelineAudioPlayer', () => {
     await player.play(0);
 
     expect(harness.media[0]?.playCount).toBe(0);
+  });
+
+  it('enters the playing state without waiting for the media play promise', async () => {
+    const harness = createHarness();
+    const player = new TimelineAudioPlayer(harness.dependencies);
+    await player.prepare(
+      createPlan([createClip('clp_host', 'trk_host', 'ast_host', 0, 5_000, 0)]),
+      createPlaybackDataMap('ast_host')
+    );
+    harness.media[0]!.playResult = new Promise(() => undefined);
+
+    const result = await Promise.race([
+      player.play(0).then(() => 'started'),
+      new Promise<string>((resolve) => setTimeout(() => resolve('blocked'), 20))
+    ]);
+
+    expect(result).toBe('started');
+    expect(player.isPlaying()).toBe(true);
   });
 
   it('starts future clips once when the shared clock enters their range', async () => {
@@ -114,6 +150,7 @@ class FakeMedia {
   playCount = 0;
   preload = '';
   src = '';
+  playResult: Promise<void> = Promise.resolve();
 
   load(): void {
     this.loadCount += 1;
@@ -123,8 +160,9 @@ class FakeMedia {
     this.pauseCount += 1;
   }
 
-  async play(): Promise<void> {
+  play(): Promise<void> {
     this.playCount += 1;
+    return this.playResult;
   }
 }
 
@@ -143,6 +181,8 @@ class FakeContext {
   currentTime = 0;
   destination = {};
   closeCount = 0;
+  resumeCount = 0;
+  resumeResult: Promise<void> = Promise.resolve();
 
   constructor(private readonly gains: FakeGain[]) {}
 
@@ -156,7 +196,10 @@ class FakeContext {
     return gain;
   }
 
-  async resume(): Promise<void> {}
+  resume(): Promise<void> {
+    this.resumeCount += 1;
+    return this.resumeResult;
+  }
 
   async close(): Promise<void> {
     this.closeCount += 1;

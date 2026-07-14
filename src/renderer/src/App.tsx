@@ -48,7 +48,6 @@ import type {
   ProviderProfilesFile,
   ResearchTaskResult
 } from '../../shared/types';
-import { getActiveTimelineClipPlaybacks } from './audioTimeline';
 import {
   createAudioEditHistory,
   prepareAudioEditRedo,
@@ -58,6 +57,7 @@ import {
   type AudioEditHistory
 } from './audioEditHistory';
 import { podcastArtistApi } from './apiClient';
+import { TimelineAudioPlayer, type TimelineAudioPlayerDependencies } from './timelineAudioPlayer';
 
 type ViewKey = 'workspace' | 'library' | 'documents' | 'audio' | 'settings';
 
@@ -865,17 +865,13 @@ function AudioView({
   const [timelineZoom, setTimelineZoom] = useState(1);
   const [playheadMs, setPlayheadMs] = useState(0);
   const [isTimelinePlaying, setIsTimelinePlaying] = useState(false);
+  const [isPreparingPlayback, setIsPreparingPlayback] = useState(false);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const timelinePanelRef = useRef<HTMLElement | null>(null);
   const timelineZoomAnchorRef = useRef<number | null>(null);
-  const editPlanRef = useRef<AudioEditPlan | null>(null);
   const editHistoryRef = useRef<AudioEditHistory | null>(null);
   const playbackDataByAssetIdRef = useRef<Map<string, AudioAssetPlaybackData>>(new Map());
-  const timelineContentDurationRef = useRef(0);
-  const timelineAudioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
-  const timelineAnimationFrameRef = useRef<number | null>(null);
-  const timelinePlaybackStartedAtRef = useRef(0);
-  const timelinePlaybackStartMsRef = useRef(0);
+  const timelinePlayerRef = useRef<TimelineAudioPlayer | null>(null);
 
   const audioAssets = useMemo(() => library?.assets.filter((asset) => asset.kind === 'audio') ?? [], [library]);
   const audioAssetById = useMemo(() => new Map(audioAssets.map((asset) => [asset.id, asset])), [audioAssets]);
@@ -955,22 +951,26 @@ function AudioView({
   const canRedoAudioEdit = Boolean(editHistory?.future.length);
 
   useEffect(() => {
-    editPlanRef.current = editPlan;
-  }, [editPlan]);
-
-  useEffect(() => {
     playbackDataByAssetIdRef.current = playbackDataByAssetId;
   }, [playbackDataByAssetId]);
 
   useEffect(() => {
-    timelineContentDurationRef.current = timelineContentDurationMs;
     setPlayheadMs((current) => Math.min(current, timelineContentDurationMs));
   }, [timelineContentDurationMs]);
 
-  useEffect(() => () => stopTimelinePlayback(false), []);
+  useEffect(
+    () => () => {
+      timelinePlayerRef.current?.dispose();
+      timelinePlayerRef.current = null;
+    },
+    []
+  );
 
   useEffect(() => {
-    stopTimelinePlayback();
+    timelinePlayerRef.current?.dispose();
+    timelinePlayerRef.current = null;
+    setIsTimelinePlaying(false);
+    setIsPreparingPlayback(false);
     setPlayheadMs(0);
     setPlaybackDataByAssetId(new Map());
     playbackDataByAssetIdRef.current = new Map();
@@ -1095,6 +1095,7 @@ function AudioView({
   }
 
   function applyAudioEditPlanChange(nextPlan: AudioEditPlan): void {
+    stopTimelinePlayback();
     const currentHistory = editHistoryRef.current;
     const nextHistory =
       currentHistory && currentHistory.projectId === nextPlan.projectId
@@ -1168,86 +1169,35 @@ function AudioView({
     return nextCache;
   }
 
-  function getMissingPlaybackAssetIds(assetIds: string[]): string[] {
-    return [...new Set(assetIds)].filter((assetId) => !playbackDataByAssetIdRef.current.has(assetId));
-  }
-
   function stopTimelinePlayback(updateState = true): void {
-    if (timelineAnimationFrameRef.current !== null) {
-      window.cancelAnimationFrame(timelineAnimationFrameRef.current);
-      timelineAnimationFrameRef.current = null;
-    }
-
-    timelineAudioElementsRef.current.forEach((audio) => {
-      audio.pause();
-      audio.src = '';
-    });
-    timelineAudioElementsRef.current.clear();
+    timelinePlayerRef.current?.pause();
     if (updateState) {
       setIsTimelinePlaying(false);
     }
   }
 
-  function syncTimelineAudioElements(playheadTimeMs: number, cache: Map<string, AudioAssetPlaybackData>): void {
-    const plan = editPlanRef.current;
-    if (!plan) return;
-
-    const activeClipPlaybacks = getActiveTimelineClipPlaybacks({
-      tracks: plan.tracks,
-      clips: plan.clips,
-      playheadMs: playheadTimeMs
-    });
-    const activeClipIds = new Set(activeClipPlaybacks.map((item) => item.clipId));
-
-    timelineAudioElementsRef.current.forEach((audio, clipId) => {
-      if (!activeClipIds.has(clipId)) {
-        audio.pause();
-        audio.src = '';
-        timelineAudioElementsRef.current.delete(clipId);
+  function getTimelinePlayer(): TimelineAudioPlayer {
+    timelinePlayerRef.current ??= new TimelineAudioPlayer({
+      createContext: () =>
+        new AudioContext() as unknown as ReturnType<TimelineAudioPlayerDependencies['createContext']>,
+      createMediaElement: () => {
+        const audio = new Audio();
+        audio.crossOrigin = 'anonymous';
+        return audio;
+      },
+      requestFrame: (callback) => window.requestAnimationFrame(callback),
+      cancelFrame: (frameId) => window.cancelAnimationFrame(frameId),
+      onTimeUpdate: (timeMs) => setPlayheadMs(timeMs),
+      onEnded: () => setIsTimelinePlaying(false),
+      onError: (playError) => {
+        setAudioError(toErrorMessage(playError));
+        setIsTimelinePlaying(false);
       }
     });
-
-    activeClipPlaybacks.forEach((clipPlayback) => {
-      if (timelineAudioElementsRef.current.has(clipPlayback.clipId)) return;
-
-      const data = cache.get(clipPlayback.assetId);
-      if (!data) return;
-
-      const clip = plan.clips.find((item) => item.id === clipPlayback.clipId);
-      const audio = new Audio(data.preferredUrl);
-      audio.preload = 'auto';
-      audio.currentTime = Math.max(0, clipPlayback.sourceOffsetMs / 1000);
-      audio.volume = Math.min(1, Math.max(0, Math.pow(10, (clip?.gainDb ?? 0) / 20)));
-      timelineAudioElementsRef.current.set(clipPlayback.clipId, audio);
-      audio.play().catch((playError: unknown) => {
-        const errorMessage = toErrorMessage(playError);
-        setAudioError(errorMessage.includes("play() failed") ? '试听音频已准备好，请再点一次播放。' : errorMessage);
-        stopTimelinePlayback();
-      });
-    });
+    return timelinePlayerRef.current;
   }
 
-  function startTimelineAnimation(cache: Map<string, AudioAssetPlaybackData>): void {
-    const tick = (): void => {
-      const nextPlayheadMs =
-        timelinePlaybackStartMsRef.current + (window.performance.now() - timelinePlaybackStartedAtRef.current);
-      const endMs = timelineContentDurationRef.current;
-
-      if (endMs <= 0 || nextPlayheadMs >= endMs) {
-        setPlayheadMs(Math.max(0, endMs));
-        stopTimelinePlayback();
-        return;
-      }
-
-      setPlayheadMs(nextPlayheadMs);
-      syncTimelineAudioElements(nextPlayheadMs, cache);
-      timelineAnimationFrameRef.current = window.requestAnimationFrame(tick);
-    };
-
-    timelineAnimationFrameRef.current = window.requestAnimationFrame(tick);
-  }
-
-  function beginTimelinePlayback(startMs = playheadMs): void {
+  async function beginTimelinePlayback(startMs = playheadMs): Promise<void> {
     if (!editPlan || !canPlayTimeline) return;
 
     const trackById = new Map(editPlan.tracks.map((track) => [track.id, track]));
@@ -1255,40 +1205,37 @@ function AudioView({
     if (!assetIds.length) return;
 
     const boundedStartMs = Math.min(Math.max(0, startMs), timelineContentDurationMs);
-    const missingAssetIds = getMissingPlaybackAssetIds(assetIds);
+    const player = getTimelinePlayer();
+    player.activate();
     setAudioError(null);
-
-    if (missingAssetIds.length) {
-      void ensurePlaybackDataForAssets(missingAssetIds)
-        .then(() => setAudioError('试听音频已准备好，请再点一次播放。'))
-        .catch((playError) => setAudioError(toErrorMessage(playError)));
-      return;
+    setIsPreparingPlayback(true);
+    try {
+      const cache = await ensurePlaybackDataForAssets(assetIds);
+      await player.prepare(editPlan, cache);
+      await player.play(boundedStartMs);
+      setIsTimelinePlaying(player.isPlaying());
+    } catch (playError) {
+      setAudioError(toErrorMessage(playError));
+      setIsTimelinePlaying(false);
+    } finally {
+      setIsPreparingPlayback(false);
     }
-
-    const cache = playbackDataByAssetIdRef.current;
-    stopTimelinePlayback();
-    setPlayheadMs(boundedStartMs);
-    timelinePlaybackStartMsRef.current = boundedStartMs;
-    timelinePlaybackStartedAtRef.current = window.performance.now();
-    setIsTimelinePlaying(true);
-    syncTimelineAudioElements(boundedStartMs, cache);
-    startTimelineAnimation(cache);
   }
 
-  function handleToggleTimelinePlayback(): void {
+  async function handleToggleTimelinePlayback(): Promise<void> {
     if (isTimelinePlaying) {
       stopTimelinePlayback();
       return;
     }
 
-    beginTimelinePlayback(playheadMs >= timelineContentDurationMs ? 0 : playheadMs);
+    await beginTimelinePlayback(playheadMs >= timelineContentDurationMs ? 0 : playheadMs);
   }
 
   function seekTimeline(nextPlayheadMs: number): void {
     const boundedPlayheadMs = Math.min(Math.max(0, nextPlayheadMs), timelineContentDurationMs);
     setPlayheadMs(boundedPlayheadMs);
     if (isTimelinePlaying) {
-      beginTimelinePlayback(boundedPlayheadMs);
+      void timelinePlayerRef.current?.seek(boundedPlayheadMs);
     }
   }
 
@@ -1556,18 +1503,26 @@ function AudioView({
   }
 
   useEffect(() => {
-    const handleAudioHistoryShortcut = (event: globalThis.KeyboardEvent): void => {
+    const handleAudioShortcut = (event: globalThis.KeyboardEvent): void => {
       const target = event.target as HTMLElement | null;
-      if (target?.closest('input, textarea, [contenteditable="true"]')) return;
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z') return;
-      event.preventDefault();
-      if (!isAudioBusy) {
-        void restoreAudioEditPlan(event.shiftKey ? 'redo' : 'undo');
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+        if (target?.closest('input, textarea, [contenteditable="true"]')) return;
+        event.preventDefault();
+        if (!isAudioBusy && !isPreparingPlayback) {
+          void restoreAudioEditPlan(event.shiftKey ? 'redo' : 'undo');
+        }
+        return;
+      }
+      if (event.code === 'Space') {
+        if (target?.closest('button, input, select, textarea, [contenteditable="true"]')) return;
+        if (!canPlayTimeline || isAudioBusy || isPreparingPlayback) return;
+        event.preventDefault();
+        void handleToggleTimelinePlayback();
       }
     };
 
-    window.addEventListener('keydown', handleAudioHistoryShortcut);
-    return () => window.removeEventListener('keydown', handleAudioHistoryShortcut);
+    window.addEventListener('keydown', handleAudioShortcut);
+    return () => window.removeEventListener('keydown', handleAudioShortcut);
   });
 
   return (
@@ -1582,8 +1537,8 @@ function AudioView({
                   className="timeline-transport-button"
                   type="button"
                   onClick={handleToggleTimelinePlayback}
-                  disabled={!canPlayTimeline || isAudioBusy}
-                  title={isTimelinePlaying ? '暂停' : '播放'}
+                  disabled={!canPlayTimeline || isAudioBusy || isPreparingPlayback}
+                  title={isPreparingPlayback ? '正在准备试听' : isTimelinePlaying ? '暂停（Space）' : '播放（Space）'}
                 >
                   {isTimelinePlaying ? <Pause size={15} /> : <Play size={15} />}
                 </button>
@@ -1597,7 +1552,7 @@ function AudioView({
                   className="timeline-history-button"
                   type="button"
                   onClick={() => void restoreAudioEditPlan('undo')}
-                  disabled={!canUndoAudioEdit || isAudioBusy}
+                  disabled={!canUndoAudioEdit || isAudioBusy || isPreparingPlayback}
                   title="撤销（⌘/Ctrl+Z）"
                 >
                   <Undo2 size={14} />
@@ -1606,7 +1561,7 @@ function AudioView({
                   className="timeline-history-button"
                   type="button"
                   onClick={() => void restoreAudioEditPlan('redo')}
-                  disabled={!canRedoAudioEdit || isAudioBusy}
+                  disabled={!canRedoAudioEdit || isAudioBusy || isPreparingPlayback}
                   title="重做（⌘/Ctrl+Shift+Z）"
                 >
                   <Redo2 size={14} />
@@ -1731,6 +1686,7 @@ function AudioView({
             </div>
           </div>
 
+          {isPreparingPlayback ? <div className="notice compact timeline-preparing">正在准备试听…</div> : null}
           {audioError ? <div className="notice error compact">{audioError}</div> : null}
           {lastExportJob ? (
             <div className={`notice compact ${lastExportJob.status === 'completed' ? 'success' : 'error'}`}>

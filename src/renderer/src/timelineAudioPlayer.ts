@@ -60,6 +60,15 @@ export class TimelineAudioPlayer {
 
   constructor(private readonly dependencies: TimelineAudioPlayerDependencies) {}
 
+  activate(): void {
+    void this.getContext()
+      .resume()
+      .catch((error) => {
+        this.dependencies.onError?.(error);
+        this.pause();
+      });
+  }
+
   async prepare(plan: AudioEditPlan, playbackDataByAssetId: Map<string, AudioAssetPlaybackData>): Promise<void> {
     this.pause();
     const context = this.getContext();
@@ -109,14 +118,14 @@ export class TimelineAudioPlayer {
   async play(startMs = this.pausedTimeMs): Promise<void> {
     const context = this.getContext();
     if (!this.plan) throw new Error('Timeline audio player is not prepared.');
-    await context.resume();
+    this.activate();
     this.stopMedia();
     this.cancelFrame();
     this.timelineStartMs = this.clampTime(startMs);
     this.pausedTimeMs = this.timelineStartMs;
     this.contextStartSeconds = context.currentTime;
     this.playing = true;
-    await this.syncMedia(this.timelineStartMs);
+    this.syncMediaInBackground(this.timelineStartMs);
     if (this.timelineStartMs >= this.durationMs()) {
       this.finish();
       return;
@@ -155,7 +164,9 @@ export class TimelineAudioPlayer {
   }
 
   dispose(): void {
-    this.pause();
+    this.playing = false;
+    this.stopMedia();
+    this.cancelFrame();
     this.chains.forEach((chain) => this.disposeChain(chain));
     this.chains.clear();
     this.plan = null;
@@ -182,11 +193,15 @@ export class TimelineAudioPlayer {
       return;
     }
     this.dependencies.onTimeUpdate(timeMs);
+    this.syncMediaInBackground(timeMs);
+    this.scheduleFrame();
+  }
+
+  private syncMediaInBackground(timeMs: number): void {
     void this.syncMedia(timeMs).catch((error) => {
       this.dependencies.onError?.(error);
       this.pause();
     });
-    this.scheduleFrame();
   }
 
   private async syncMedia(timeMs: number): Promise<void> {

@@ -872,6 +872,11 @@ dd {
   color: var(--reference);
 }
 
+.notice.timeline-preparing {
+  border-color: color-mix(in oklch, var(--signal), transparent 62%);
+  color: var(--signal);
+}
+
 .toast-stack {
   position: fixed;
   right: var(--space-5);
