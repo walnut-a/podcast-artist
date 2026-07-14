@@ -1,6 +1,6 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'electron';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import type {
   AddAudioClipInput,
   AppendTaskResultInput,
@@ -44,15 +44,33 @@ import {
   readProjectTasks,
   readResearchTaskResult,
   replaceAudioEditPlan,
+  resolveAudioAssetPlaybackPath,
   rippleDeleteAudioClip,
   splitAudioClip,
   updateAudioTrackInEditPlan,
   deleteAudioTrackInEditPlan,
   updateAudioClipTiming
 } from './services/workspace';
+import {
+  audioProtocolScheme,
+  createAudioProtocolRequestHandler
+} from './services/audioProtocol';
 import { startResearchTask } from './services/researchTaskRunner';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: audioProtocolScheme,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true
+    }
+  }
+]);
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -285,7 +303,24 @@ function registerIpc(): void {
   });
 }
 
+async function registerAudioProtocol(): Promise<void> {
+  await protocol.handle(
+    audioProtocolScheme,
+    createAudioProtocolRequestHandler({
+      resolvePath: async (input) => {
+        const { settings } = await ensureAppConfig();
+        return resolveAudioAssetPlaybackPath(settings, input);
+      },
+      fetchFile: async (filePath, request) =>
+        net.fetch(pathToFileURL(filePath).toString(), {
+          headers: request.headers
+        })
+    })
+  );
+}
+
 void app.whenReady().then(async () => {
+  await registerAudioProtocol();
   registerIpc();
   await createWindow();
 

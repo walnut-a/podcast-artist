@@ -52,6 +52,7 @@ import type {
   WorkspaceSummary
 } from '../../shared/types';
 import { splitAudioClipInPlan } from '../../shared/audioEditPlan';
+import { createAudioProtocolUrl } from './audioProtocol';
 import { createId, slugifyProjectTitle } from './ids';
 import { ensureDir, readJsonFile, writeJsonFile, writeTextFile } from './jsonFile';
 
@@ -779,12 +780,31 @@ export async function readAudioAssetPlaybackData(
     assetId: asset.id,
     sourceUrl,
     proxyUrl,
-    preferredUrl: proxyUrl ?? sourceUrl,
+    preferredUrl: createAudioProtocolUrl(input),
     durationMs: validPeaks?.durationMs ?? getAssetDurationMs(asset),
     peaks: validPeaks,
     sourceHash: asset.sha256,
     loadedAt: new Date().toISOString()
   };
+}
+
+export async function resolveAudioAssetPlaybackPath(
+  settings: AppSettings,
+  input: AudioAssetProcessingInput
+): Promise<string> {
+  const { projectRecord, asset, assetPath } = await getProjectAudioAsset(settings, input.projectId, input.assetId);
+  const proxy = await readJsonFile<AudioProxy>(
+    path.join(projectRecord.projectRoot, '.podcast-artist', 'audio-cache', 'proxy', `${asset.id}.json`)
+  );
+  if (proxy?.sourceHash === asset.sha256) {
+    const proxyAbsolutePath = path.resolve(projectRecord.projectRoot, proxy.proxyPath);
+    const relativeProxyPath = path.relative(projectRecord.projectRoot, proxyAbsolutePath);
+    const isInsideProject = relativeProxyPath && !relativeProxyPath.startsWith('..') && !path.isAbsolute(relativeProxyPath);
+    if (isInsideProject && (await fileExists(proxyAbsolutePath))) {
+      return proxyAbsolutePath;
+    }
+  }
+  return assetPath;
 }
 
 export async function readAudioEditPlan(settings: AppSettings, projectId: string): Promise<AudioEditPlan> {

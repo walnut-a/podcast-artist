@@ -30,6 +30,7 @@ import {
   readProjectTasks,
   readResearchTaskResult,
   replaceAudioEditPlan,
+  resolveAudioAssetPlaybackPath,
   rippleDeleteAudioClip,
   splitAudioClip,
   updateAudioTrackInEditPlan,
@@ -1128,11 +1129,13 @@ describe('workspace local file contract', () => {
     await generateAudioPeaks(settings, { projectId: project.id, assetId: asset.id, pointsPerSecond: 2 });
 
     const playbackData = await readAudioAssetPlaybackData(settings, { projectId: project.id, assetId: asset.id });
+    const playbackPath = await resolveAudioAssetPlaybackPath(settings, { projectId: project.id, assetId: asset.id });
 
     expect(playbackData.schemaVersion).toBe('audioAssetPlayback.v1');
     expect(playbackData.sourceUrl).toMatch(/^file:/);
     expect(playbackData.proxyUrl).toMatch(/^file:/);
-    expect(playbackData.preferredUrl).toBe(playbackData.proxyUrl);
+    expect(playbackData.preferredUrl).toBe(`podcast-audio://asset/${project.id}/${asset.id}`);
+    expect(playbackPath).toBe(path.join(tempDir, 'projects', project.slug, '.podcast-artist', 'audio-cache', 'proxy', `${asset.id}.wav`));
     expect(playbackData.peaks?.peaks).toEqual([0.25, 0.5, 0.75, 1]);
     expect(playbackData.durationMs).toBe(2000);
     expect(playbackData.sourceUrl).toContain('/library/projects/');
