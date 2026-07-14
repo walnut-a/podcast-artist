@@ -1244,6 +1244,7 @@ dd {
 
 .audio-command-actions,
 .audio-command-left,
+.timeline-history-controls,
 .timeline-transport,
 .timeline-zoom-control {
   display: flex;
@@ -1362,6 +1363,7 @@ dd {
   text-align: right;
 }
 
+.timeline-history-button,
 .timeline-zoom-button {
   display: grid;
   place-items: center;
@@ -1375,12 +1377,14 @@ dd {
   cursor: pointer;
 }
 
+.timeline-history-button:hover:not(:disabled),
 .timeline-zoom-button:hover:not(:disabled) {
   border-color: var(--border-strong);
   background: var(--surface-3);
   color: var(--text);
 }
 
+.timeline-history-button:disabled,
 .timeline-zoom-button:disabled {
   cursor: default;
   opacity: 0.35;

@@ -11,11 +11,13 @@ import {
   Play,
   Plus,
   RefreshCcw,
+  Redo2,
   Scissors,
   Send,
   Settings,
   Terminal,
   Trash2,
+  Undo2,
   Volume2,
   VolumeX,
   Wrench,
@@ -47,6 +49,14 @@ import type {
   ResearchTaskResult
 } from '../../shared/types';
 import { getActiveTimelineClipPlaybacks } from './audioTimeline';
+import {
+  createAudioEditHistory,
+  prepareAudioEditRedo,
+  prepareAudioEditUndo,
+  recordAudioEditPlanChange,
+  syncRestoredAudioEditPlan,
+  type AudioEditHistory
+} from './audioEditHistory';
 import { podcastArtistApi } from './apiClient';
 
 type ViewKey = 'workspace' | 'library' | 'documents' | 'audio' | 'settings';
@@ -844,6 +854,7 @@ function AudioView({
   const currentProject = state.workspace.projects.find((project) => project.id === currentProjectId) ?? null;
   const [library, setLibrary] = useState<LibraryAssetsFile | null>(null);
   const [editPlan, setEditPlan] = useState<AudioEditPlan | null>(null);
+  const [editHistory, setEditHistory] = useState<AudioEditHistory | null>(null);
   const [lastExportJob, setLastExportJob] = useState<ExportJob | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [isAudioBusy, setIsAudioBusy] = useState(false);
@@ -858,6 +869,7 @@ function AudioView({
   const timelinePanelRef = useRef<HTMLElement | null>(null);
   const timelineZoomAnchorRef = useRef<number | null>(null);
   const editPlanRef = useRef<AudioEditPlan | null>(null);
+  const editHistoryRef = useRef<AudioEditHistory | null>(null);
   const playbackDataByAssetIdRef = useRef<Map<string, AudioAssetPlaybackData>>(new Map());
   const timelineContentDurationRef = useRef(0);
   const timelineAudioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
@@ -939,6 +951,8 @@ function AudioView({
   const canRestoreClipEnd = Boolean(
     selectedClip && selectedClipAssetDurationMs !== null && selectedClip.sourceEndMs < selectedClipAssetDurationMs
   );
+  const canUndoAudioEdit = Boolean(editHistory?.past.length);
+  const canRedoAudioEdit = Boolean(editHistory?.future.length);
 
   useEffect(() => {
     editPlanRef.current = editPlan;
@@ -991,6 +1005,8 @@ function AudioView({
     if (!currentProjectId) {
       setLibrary(null);
       setEditPlan(null);
+      setEditHistory(null);
+      editHistoryRef.current = null;
       setSelectedAudioAssetId(null);
       setSelectedClipId(null);
       setPlaybackData(null);
@@ -1005,6 +1021,9 @@ function AudioView({
         if (!isMounted) return;
         setLibrary(nextLibrary);
         setEditPlan(nextPlan);
+        const nextHistory = createAudioEditHistory(nextPlan);
+        editHistoryRef.current = nextHistory;
+        setEditHistory(nextHistory);
       })
       .catch((loadError) => {
         if (isMounted) setAudioError(toErrorMessage(loadError));
@@ -1066,13 +1085,52 @@ function AudioView({
     };
   }, [currentProjectId, selectedAudioAssetId]);
 
-  async function reloadAudioState(projectId: string): Promise<void> {
+  async function reloadAudioState(projectId: string): Promise<AudioEditPlan> {
     const [nextLibrary, nextPlan] = await Promise.all([
       podcastArtistApi.readProjectLibrary(projectId),
       podcastArtistApi.readAudioEditPlan(projectId)
     ]);
     setLibrary(nextLibrary);
+    return nextPlan;
+  }
+
+  function applyAudioEditPlanChange(nextPlan: AudioEditPlan): void {
+    const currentHistory = editHistoryRef.current;
+    const nextHistory =
+      currentHistory && currentHistory.projectId === nextPlan.projectId
+        ? recordAudioEditPlanChange(currentHistory, nextPlan)
+        : createAudioEditHistory(nextPlan);
+    editHistoryRef.current = nextHistory;
+    setEditHistory(nextHistory);
     setEditPlan(nextPlan);
+  }
+
+  async function restoreAudioEditPlan(direction: 'undo' | 'redo'): Promise<void> {
+    if (!currentProjectId || isAudioBusy) return;
+    const currentHistory = editHistoryRef.current;
+    if (!currentHistory) return;
+    const preparedHistory =
+      direction === 'undo' ? prepareAudioEditUndo(currentHistory) : prepareAudioEditRedo(currentHistory);
+    if (!preparedHistory) return;
+
+    stopTimelinePlayback();
+    setAudioError(null);
+    setIsAudioBusy(true);
+    try {
+      const persistedPlan = await podcastArtistApi.replaceAudioEditPlan({
+        projectId: currentProjectId,
+        expectedUpdatedAt: currentHistory.present.updatedAt,
+        plan: preparedHistory.present
+      });
+      const syncedHistory = syncRestoredAudioEditPlan(preparedHistory, persistedPlan);
+      editHistoryRef.current = syncedHistory;
+      setEditHistory(syncedHistory);
+      setEditPlan(persistedPlan);
+    } catch (restoreError) {
+      setAudioError(toErrorMessage(restoreError));
+    } finally {
+      setIsAudioBusy(false);
+    }
   }
 
   async function reloadPlaybackData(assetId: string): Promise<void> {
@@ -1256,7 +1314,8 @@ function AudioView({
         sourceEndMs: Math.round(sourceEndMs)
       });
       setSelectedAudioAssetId(assetId);
-      await reloadAudioState(currentProjectId);
+      const nextPlan = await reloadAudioState(currentProjectId);
+      applyAudioEditPlanChange(nextPlan);
       setSelectedClipId(clip.id);
     } catch (clipError) {
       setAudioError(toErrorMessage(clipError));
@@ -1274,7 +1333,7 @@ function AudioView({
         projectId: currentProjectId,
         name: `音轨 ${(editPlan?.tracks.length ?? 0) + 1}`
       });
-      setEditPlan(plan);
+      applyAudioEditPlanChange(plan);
     } catch (trackError) {
       setAudioError(toErrorMessage(trackError));
     } finally {
@@ -1292,7 +1351,7 @@ function AudioView({
         trackId,
         ...input
       });
-      setEditPlan(plan);
+      applyAudioEditPlanChange(plan);
     } catch (trackError) {
       setAudioError(toErrorMessage(trackError));
     } finally {
@@ -1322,7 +1381,7 @@ function AudioView({
     setIsAudioBusy(true);
     try {
       const plan = await podcastArtistApi.deleteAudioTrack({ projectId: currentProjectId, trackId });
-      setEditPlan(plan);
+      applyAudioEditPlanChange(plan);
     } catch (trackError) {
       setAudioError(toErrorMessage(trackError));
     } finally {
@@ -1368,7 +1427,7 @@ function AudioView({
         clipId: selectedClip.id,
         timelineSplitMs
       });
-      setEditPlan(result.plan);
+      applyAudioEditPlanChange(result.plan);
       setSelectedClipId(result.rightClipId);
       setPlayheadMs(timelineSplitMs);
       timelinePanelRef.current?.focus();
@@ -1422,7 +1481,7 @@ function AudioView({
         sourceStartMs,
         sourceEndMs
       });
-      setEditPlan(plan);
+      applyAudioEditPlanChange(plan);
       setSelectedClipId(selectedClip.id);
     } catch (timingError) {
       setAudioError(toErrorMessage(timingError));
@@ -1446,7 +1505,7 @@ function AudioView({
         timelineStartMs,
         durationMs: clipGapStepMs
       });
-      setEditPlan(plan);
+      applyAudioEditPlanChange(plan);
       setSelectedClipId(selectedClip.id);
     } catch (gapError) {
       setAudioError(toErrorMessage(gapError));
@@ -1464,7 +1523,7 @@ function AudioView({
       if (selectedClipId === clipId) {
         setSelectedClipId(null);
       }
-      setEditPlan(plan);
+      applyAudioEditPlanChange(plan);
     } catch (deleteError) {
       setAudioError(toErrorMessage(deleteError));
     } finally {
@@ -1496,6 +1555,21 @@ function AudioView({
     setSelectedAudioAssetId(assetId);
   }
 
+  useEffect(() => {
+    const handleAudioHistoryShortcut = (event: globalThis.KeyboardEvent): void => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable="true"]')) return;
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z') return;
+      event.preventDefault();
+      if (!isAudioBusy) {
+        void restoreAudioEditPlan(event.shiftKey ? 'redo' : 'undo');
+      }
+    };
+
+    window.addEventListener('keydown', handleAudioHistoryShortcut);
+    return () => window.removeEventListener('keydown', handleAudioHistoryShortcut);
+  });
+
   return (
     <section className="audio-view">
       {currentProject ? (
@@ -1516,6 +1590,27 @@ function AudioView({
                 <span>{formatTimecode(playheadMs / 1000)}</span>
                 <span className="timeline-transport-separator">/</span>
                 <span>{formatTimecode(timelineContentDurationMs / 1000)}</span>
+              </div>
+
+              <div className="timeline-history-controls" aria-label="剪辑历史">
+                <button
+                  className="timeline-history-button"
+                  type="button"
+                  onClick={() => void restoreAudioEditPlan('undo')}
+                  disabled={!canUndoAudioEdit || isAudioBusy}
+                  title="撤销（⌘/Ctrl+Z）"
+                >
+                  <Undo2 size={14} />
+                </button>
+                <button
+                  className="timeline-history-button"
+                  type="button"
+                  onClick={() => void restoreAudioEditPlan('redo')}
+                  disabled={!canRedoAudioEdit || isAudioBusy}
+                  title="重做（⌘/Ctrl+Shift+Z）"
+                >
+                  <Redo2 size={14} />
+                </button>
               </div>
 
               <div className="timeline-zoom-control" aria-label="时间线缩放">
