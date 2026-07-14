@@ -16,6 +16,7 @@ import type {
   InsertAudioGapInput,
   ProviderProfilesFile,
   ReadResearchTaskResultInput,
+  ReplaceAudioEditPlanInput,
   RippleDeleteAudioClipInput,
   SplitAudioClipInput,
   UpdateAudioTrackInput,
@@ -42,6 +43,7 @@ import {
   readProjectDocument,
   readProjectTasks,
   readResearchTaskResult,
+  replaceAudioEditPlan,
   rippleDeleteAudioClip,
   splitAudioClip,
   updateAudioTrackInEditPlan,
@@ -210,6 +212,11 @@ function registerIpc(): void {
   ipcMain.handle('audio:readEditPlan', async (_event, projectId: string) => {
     const { settings } = await ensureAppConfig();
     return readAudioEditPlan(settings, projectId);
+  });
+
+  ipcMain.handle('audio:replaceEditPlan', async (_event, input: ReplaceAudioEditPlanInput) => {
+    const { settings } = await ensureAppConfig();
+    return replaceAudioEditPlan(settings, input);
   });
 
   ipcMain.handle('audio:createTrack', async (_event, input: CreateAudioTrackInput) => {

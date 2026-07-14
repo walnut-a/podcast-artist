@@ -30,6 +30,7 @@ import type {
   ProviderProfilesFile,
   ProjectSummary,
   ReadResearchTaskResultInput,
+  ReplaceAudioEditPlanInput,
   RippleDeleteAudioClipInput,
   SplitAudioClipInput,
   UpdateAudioTrackInput,
@@ -320,6 +321,30 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
   },
   async readAudioEditPlan(projectId: string) {
     return getPreviewEditPlan(projectId);
+  },
+  async replaceAudioEditPlan(input: ReplaceAudioEditPlanInput) {
+    const currentPlan = getPreviewEditPlan(input.projectId);
+    if (currentPlan.updatedAt !== input.expectedUpdatedAt) {
+      throw new Error('Audio edit plan changed since this history entry was created. Reload before restoring it.');
+    }
+    if (
+      input.plan.schemaVersion !== 'audioEditPlan.v1' ||
+      input.plan.id !== currentPlan.id ||
+      input.plan.projectId !== input.projectId
+    ) {
+      throw new Error('Audio edit plan identity does not match the current project.');
+    }
+    const trackIds = new Set(input.plan.tracks.map((track) => track.id));
+    if (input.plan.clips.some((clip) => !trackIds.has(clip.trackId))) {
+      throw new Error('Audio edit plan contains a clip whose track does not exist.');
+    }
+    const currentTimestamp = Date.parse(currentPlan.updatedAt);
+    const nextPlan = {
+      ...input.plan,
+      updatedAt: new Date(Math.max(Date.now(), Number.isFinite(currentTimestamp) ? currentTimestamp + 1 : 0)).toISOString()
+    } satisfies AudioEditPlan;
+    previewEditPlans.set(input.projectId, nextPlan);
+    return nextPlan;
   },
   async createAudioTrack(input: CreateAudioTrackInput) {
     const plan = getPreviewEditPlan(input.projectId);

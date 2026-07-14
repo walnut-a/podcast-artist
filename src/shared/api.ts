@@ -28,6 +28,7 @@ import type {
   ProviderProfilesFile,
   ProjectSummary,
   ReadResearchTaskResultInput,
+  ReplaceAudioEditPlanInput,
   ResearchTaskResult,
   RippleDeleteAudioClipInput,
   SplitAudioClipInput,
@@ -53,6 +54,7 @@ export interface PodcastArtistApi {
   appendTaskResultToDocument(input: AppendTaskResultInput): Promise<AppendMarkdownDocumentResult>;
   readProjectLibrary(projectId: string): Promise<LibraryAssetsFile>;
   readAudioEditPlan(projectId: string): Promise<AudioEditPlan>;
+  replaceAudioEditPlan(input: ReplaceAudioEditPlanInput): Promise<AudioEditPlan>;
   createAudioTrack(input: CreateAudioTrackInput): Promise<AudioEditPlan>;
   updateAudioTrack(input: UpdateAudioTrackInput): Promise<AudioEditPlan>;
   deleteAudioTrack(input: DeleteAudioTrackInput): Promise<AudioEditPlan>;

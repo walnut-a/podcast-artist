@@ -41,6 +41,7 @@ import type {
   ProjectSummary,
   ProviderKind,
   ReadResearchTaskResultInput,
+  ReplaceAudioEditPlanInput,
   ResearchTaskResult,
   RippleDeleteAudioClipInput,
   SplitAudioClipInput,
@@ -793,6 +794,43 @@ export async function readAudioEditPlan(settings: AppSettings, projectId: string
   }
 
   return readAudioEditPlanForProject(projectRecord.projectRoot);
+}
+
+export async function replaceAudioEditPlan(
+  settings: AppSettings,
+  input: ReplaceAudioEditPlanInput
+): Promise<AudioEditPlan> {
+  const projectRecord = await findProjectById(settings, input.projectId);
+  if (!projectRecord) {
+    throw new Error(`Project not found: ${input.projectId}`);
+  }
+
+  const currentPlan = await readAudioEditPlanForProject(projectRecord.projectRoot);
+  if (currentPlan.updatedAt !== input.expectedUpdatedAt) {
+    throw new Error('Audio edit plan changed since this history entry was created. Reload before restoring it.');
+  }
+  if (
+    input.plan.schemaVersion !== 'audioEditPlan.v1' ||
+    input.plan.id !== currentPlan.id ||
+    input.plan.projectId !== input.projectId
+  ) {
+    throw new Error('Audio edit plan identity does not match the current project.');
+  }
+
+  const trackIds = new Set(input.plan.tracks.map((track) => track.id));
+  if (input.plan.clips.some((clip) => !trackIds.has(clip.trackId))) {
+    throw new Error('Audio edit plan contains a clip whose track does not exist.');
+  }
+
+  const currentTimestamp = Date.parse(currentPlan.updatedAt);
+  const updatedAt = new Date(Math.max(Date.now(), Number.isFinite(currentTimestamp) ? currentTimestamp + 1 : 0)).toISOString();
+  const nextPlan: AudioEditPlan = {
+    ...input.plan,
+    updatedAt
+  };
+  await writeAudioEditPlanForProject(projectRecord.projectRoot, nextPlan);
+  await touchProjectManifest(projectRecord.projectRoot, projectRecord.manifest, updatedAt);
+  return nextPlan;
 }
 
 export async function createAudioTrackInEditPlan(settings: AppSettings, input: CreateAudioTrackInput): Promise<AudioEditPlan> {

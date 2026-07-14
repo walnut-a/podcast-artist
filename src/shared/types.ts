@@ -284,6 +284,12 @@ export interface AudioEditPlan {
   updatedAt: string;
 }
 
+export interface ReplaceAudioEditPlanInput {
+  projectId: string;
+  expectedUpdatedAt: string;
+  plan: AudioEditPlan;
+}
+
 export interface AudioTrack {
   id: string;
   name: string;

@@ -29,6 +29,7 @@ import {
   readProjectLibrary,
   readProjectTasks,
   readResearchTaskResult,
+  replaceAudioEditPlan,
   rippleDeleteAudioClip,
   splitAudioClip,
   updateAudioTrackInEditPlan,
@@ -534,6 +535,66 @@ describe('workspace local file contract', () => {
       name: '主持人',
       muted: true
     });
+  });
+
+  it('replaces an audio edit plan only when the persisted version and identity match', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: 'Undo plan' });
+    const otherProject = await createProject(settings, { title: 'Other plan' });
+    const initialPlan = await readAudioEditPlan(settings, project.id);
+    const restoredSnapshot = {
+      ...initialPlan,
+      tracks: initialPlan.tracks.map((track, index) => (index === 0 ? { ...track, name: '主持人' } : track))
+    };
+
+    const restored = await replaceAudioEditPlan(settings, {
+      projectId: project.id,
+      expectedUpdatedAt: initialPlan.updatedAt,
+      plan: restoredSnapshot
+    });
+
+    expect(restored.tracks[0]?.name).toBe('主持人');
+    expect(Date.parse(restored.updatedAt)).toBeGreaterThan(Date.parse(initialPlan.updatedAt));
+    expect(await readAudioEditPlan(settings, project.id)).toEqual(restored);
+
+    await expect(
+      replaceAudioEditPlan(settings, {
+        projectId: project.id,
+        expectedUpdatedAt: initialPlan.updatedAt,
+        plan: initialPlan
+      })
+    ).rejects.toThrow('changed');
+
+    await expect(
+      replaceAudioEditPlan(settings, {
+        projectId: project.id,
+        expectedUpdatedAt: restored.updatedAt,
+        plan: { ...restored, projectId: otherProject.id }
+      })
+    ).rejects.toThrow('project');
+
+    await expect(
+      replaceAudioEditPlan(settings, {
+        projectId: project.id,
+        expectedUpdatedAt: restored.updatedAt,
+        plan: {
+          ...restored,
+          clips: [
+            {
+              id: 'clp_dangling',
+              trackId: 'trk_missing',
+              assetId: 'ast_missing',
+              sourceStartMs: 0,
+              sourceEndMs: 1_000,
+              timelineStartMs: 0,
+              gainDb: 0,
+              fadeInMs: 20,
+              fadeOutMs: 20
+            }
+          ]
+        }
+      })
+    ).rejects.toThrow('track');
   });
 
   it('deletes empty audio tracks but keeps tracks that contain clips', async () => {
