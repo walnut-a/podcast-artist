@@ -64,6 +64,11 @@ textarea {
   font: inherit;
 }
 
+button:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--accent), transparent 18%);
+  outline-offset: 2px;
+}
+
 .loading-screen {
   min-height: 100vh;
   display: grid;
@@ -1433,6 +1438,11 @@ dd {
   padding: 0;
   background: var(--bg);
   overscroll-behavior-x: contain;
+}
+
+.timeline-panel:focus-visible {
+  outline: 1px solid color-mix(in oklch, var(--accent), transparent 24%);
+  outline-offset: -1px;
 }
 
 .timeline-scroll-content {
