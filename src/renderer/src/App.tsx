@@ -57,6 +57,7 @@ import {
   type AudioEditHistory
 } from './audioEditHistory';
 import { resolveAudioAssetDurationMs } from './audioAssetDuration';
+import { processImportedAudioAsset } from './audioImportProcessing';
 import { podcastArtistApi } from './apiClient';
 import { TimelineAudioPlayer, type TimelineAudioPlayerDependencies } from './timelineAudioPlayer';
 
@@ -156,9 +157,28 @@ export function App(): ReactElement {
         setNotice('已取消导入。');
         return;
       }
+      setNotice(`已导入 ${asset.originalFileName}，正在分析并生成播放缓存…`);
+      let processingError: unknown = null;
+      try {
+        await processImportedAudioAsset(
+          { projectId: project.id, assetId: asset.id },
+          {
+            analyze: (input) => podcastArtistApi.analyzeAudioAsset(input),
+            generateProxy: (input) => podcastArtistApi.generateAudioProxy(input),
+            generatePeaks: (input) => podcastArtistApi.generateAudioPeaks(input)
+          }
+        );
+      } catch (error) {
+        processingError = error;
+      }
       const workspace = await podcastArtistApi.refreshWorkspace();
       setState((current) => (current ? { ...current, workspace } : current));
-      setNotice(`已导入音频素材：${asset.originalFileName}`);
+      if (processingError) {
+        setNotice(`已导入音频素材：${asset.originalFileName}`);
+        setError(`素材已保留，但音频处理未完成：${toErrorMessage(processingError)}`);
+      } else {
+        setNotice(`已导入并完成音频处理：${asset.originalFileName}`);
+      }
     } catch (importError) {
       setError(toErrorMessage(importError));
     }

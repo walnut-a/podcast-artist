@@ -27,4 +27,15 @@ describe('renderer research-task and timeline wiring contracts', () => {
     expect(appSource).toContain('timelinePanelRef.current?.focus()');
     expect(appSource).toContain('在播放头切开');
   });
+
+  it('keeps an imported asset when cache processing fails and reports the partial result', async () => {
+    const source = await readFile(new URL('./App.tsx', import.meta.url), 'utf8');
+    const processingCall = source.indexOf('await processImportedAudioAsset(');
+    const workspaceRefresh = source.indexOf('const workspace = await podcastArtistApi.refreshWorkspace();', processingCall);
+
+    expect(processingCall).toBeGreaterThan(-1);
+    expect(workspaceRefresh).toBeGreaterThan(processingCall);
+    expect(source).toContain('素材已保留，但音频处理未完成：');
+    expect(source).toContain('已导入并完成音频处理：');
+  });
 });
