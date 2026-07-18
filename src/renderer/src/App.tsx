@@ -56,6 +56,7 @@ import {
   syncRestoredAudioEditPlan,
   type AudioEditHistory
 } from './audioEditHistory';
+import { resolveAudioAssetDurationMs } from './audioAssetDuration';
 import { podcastArtistApi } from './apiClient';
 import { TimelineAudioPlayer, type TimelineAudioPlayerDependencies } from './timelineAudioPlayer';
 
@@ -1247,12 +1248,17 @@ function AudioView({
 
   async function handleAddClipToTrack(assetId: string, trackName: string): Promise<void> {
     if (!currentProjectId) return;
-    const assetDurationMs = getAssetAudioDurationMs(audioAssetById.get(assetId));
-    const sourceEndMs = assetDurationMs ?? 60_000;
+    const asset = audioAssetById.get(assetId);
+    if (!asset) return;
 
     setAudioError(null);
     setIsAudioBusy(true);
     try {
+      const sourceEndMs = await resolveAudioAssetDurationMs(asset, async () => {
+        const analysis = await podcastArtistApi.analyzeAudioAsset({ projectId: currentProjectId, assetId });
+        setLibrary(await podcastArtistApi.readProjectLibrary(currentProjectId));
+        return analysis;
+      });
       const clip = await podcastArtistApi.addAudioClipToEditPlan({
         projectId: currentProjectId,
         assetId,
