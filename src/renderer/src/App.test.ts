@@ -38,4 +38,23 @@ describe('renderer research-task and timeline wiring contracts', () => {
     expect(source).toContain('素材已保留，但音频处理未完成：');
     expect(source).toContain('已导入并完成音频处理：');
   });
+
+  it('wires completed export actions through the secure Electron boundary', async () => {
+    const [appSource, apiSource, mainSource, preloadSource] = await Promise.all([
+      readFile(new URL('./App.tsx', import.meta.url), 'utf8'),
+      readFile(new URL('../../shared/api.ts', import.meta.url), 'utf8'),
+      readFile(new URL('../../main/index.ts', import.meta.url), 'utf8'),
+      readFile(new URL('../../preload/index.ts', import.meta.url), 'utf8')
+    ]);
+
+    expect(apiSource).toContain('revealExportOutput(input: ExportOutputInput)');
+    expect(apiSource).toContain('openExportOutput(input: ExportOutputInput)');
+    expect(preloadSource).toContain("ipcRenderer.invoke('audio:revealExportOutput', input)");
+    expect(preloadSource).toContain("ipcRenderer.invoke('audio:openExportOutput', input)");
+    expect(mainSource).toContain("ipcMain.handle('audio:revealExportOutput'");
+    expect(mainSource).toContain("ipcMain.handle('audio:openExportOutput'");
+    expect(mainSource).toContain('resolveExportOutputPath(settings, input)');
+    expect(appSource).toContain('在 Finder 中显示');
+    expect(appSource).toContain('打开文件');
+  });
 });

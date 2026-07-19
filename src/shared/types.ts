@@ -374,6 +374,11 @@ export interface ExportAudioInput {
   planId?: 'pln_rough_cut';
 }
 
+export interface ExportOutputInput {
+  projectId: string;
+  jobId: string;
+}
+
 export interface ExportJob {
   schemaVersion: 'exportJob.v1';
   id: string;

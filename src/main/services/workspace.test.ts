@@ -31,6 +31,7 @@ import {
   readResearchTaskResult,
   replaceAudioEditPlan,
   resolveAudioAssetPlaybackPath,
+  resolveExportOutputPath,
   rippleDeleteAudioClip,
   splitAudioClip,
   updateAudioTrackInEditPlan,
@@ -966,7 +967,35 @@ describe('workspace local file contract', () => {
     expect(job.status).toBe('completed');
     expect(job.outputPath).toMatch(/^exports\//);
     expect(await readFile(path.join(projectRoot, job.outputPath), 'utf8')).toBe('rendered audio');
+    await expect(resolveExportOutputPath(settings, { projectId: project.id, jobId: job.id })).resolves.toBe(
+      path.join(projectRoot, job.outputPath)
+    );
     await expectFile(path.join(projectRoot, '.podcast-artist', 'renders', `${job.id}.json`));
+  });
+
+  it('rejects an export job whose output escapes the project exports directory', async () => {
+    const settings = createSettings(tempDir);
+    const project = await createProject(settings, { title: 'Unsafe Export' });
+    const projectRoot = path.join(tempDir, project.projectPath);
+    const jobId = 'exp_unsafe';
+    await writeFile(
+      path.join(projectRoot, '.podcast-artist', 'renders', `${jobId}.json`),
+      JSON.stringify({
+        schemaVersion: 'exportJob.v1',
+        id: jobId,
+        projectId: project.id,
+        sourcePlanId: 'pln_rough_cut',
+        status: 'completed',
+        settings: { format: 'wav', sampleRate: 48_000, channels: 2, loudnessTargetLufs: -16 },
+        outputPath: '../outside.wav',
+        createdAt: '2026-07-20T00:00:00.000Z',
+        completedAt: '2026-07-20T00:00:01.000Z',
+        error: null
+      }),
+      'utf8'
+    );
+
+    await expect(resolveExportOutputPath(settings, { projectId: project.id, jobId })).rejects.toThrow('exports');
   });
 
   it('skips clips on muted tracks when exporting an edit plan', async () => {

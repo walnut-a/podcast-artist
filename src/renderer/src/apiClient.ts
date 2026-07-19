@@ -22,6 +22,7 @@ import type {
   DependencyStatusFile,
   ExportAudioInput,
   ExportJob,
+  ExportOutputInput,
   GenerateAudioPeaksInput,
   InsertAudioGapInput,
   LibraryAsset,
@@ -543,6 +544,12 @@ export const podcastArtistApi: PodcastArtistApi = window.podcastArtist ?? {
     previewExportJobs.set(input.projectId, [...(previewExportJobs.get(input.projectId) ?? []), job]);
     return job;
   },
+  async revealExportOutput(input: ExportOutputInput) {
+    getPreviewCompletedExport(input);
+  },
+  async openExportOutput(input: ExportOutputInput) {
+    getPreviewCompletedExport(input);
+  },
   async analyzeAudioAsset(input: AudioAssetProcessingInput) {
     const library = getPreviewLibrary(input.projectId);
     const asset = library.assets.find((item) => item.id === input.assetId);
@@ -672,6 +679,14 @@ function getPreviewEditPlan(projectId: string): AudioEditPlan {
     throw new Error(`Audio edit plan not found: ${projectId}`);
   }
   return plan;
+}
+
+function getPreviewCompletedExport(input: ExportOutputInput): ExportJob {
+  const job = (previewExportJobs.get(input.projectId) ?? []).find((item) => item.id === input.jobId);
+  if (!job || job.status !== 'completed') {
+    throw new Error(`Completed export job not found: ${input.jobId}`);
+  }
+  return job;
 }
 
 function createPreviewEditPlan(projectId: string, now: string): AudioEditPlan {

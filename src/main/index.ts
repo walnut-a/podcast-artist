@@ -12,6 +12,7 @@ import type {
   CreateResearchTaskInput,
   DeleteAudioTrackInput,
   ExportAudioInput,
+  ExportOutputInput,
   GenerateAudioPeaksInput,
   InsertAudioGapInput,
   ProviderProfilesFile,
@@ -45,6 +46,7 @@ import {
   readResearchTaskResult,
   replaceAudioEditPlan,
   resolveAudioAssetPlaybackPath,
+  resolveExportOutputPath,
   rippleDeleteAudioClip,
   splitAudioClip,
   updateAudioTrackInEditPlan,
@@ -280,6 +282,19 @@ function registerIpc(): void {
   ipcMain.handle('audio:exportEditPlan', async (_event, input: ExportAudioInput) => {
     const { settings } = await ensureAppConfig();
     return exportAudioEditPlan(settings, input);
+  });
+
+  ipcMain.handle('audio:revealExportOutput', async (_event, input: ExportOutputInput) => {
+    const { settings } = await ensureAppConfig();
+    const outputPath = await resolveExportOutputPath(settings, input);
+    shell.showItemInFolder(outputPath);
+  });
+
+  ipcMain.handle('audio:openExportOutput', async (_event, input: ExportOutputInput) => {
+    const { settings } = await ensureAppConfig();
+    const outputPath = await resolveExportOutputPath(settings, input);
+    const errorMessage = await shell.openPath(outputPath);
+    if (errorMessage) throw new Error(errorMessage);
   });
 
   ipcMain.handle('audio:analyzeAsset', async (_event, input: AudioAssetProcessingInput) => {

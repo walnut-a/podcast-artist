@@ -1523,6 +1523,24 @@ function AudioView({
     }
   }
 
+  async function handleExportOutputAction(action: 'reveal' | 'open'): Promise<void> {
+    if (!currentProjectId || lastExportJob?.status !== 'completed') return;
+    setAudioError(null);
+    setIsAudioBusy(true);
+    try {
+      const input = { projectId: currentProjectId, jobId: lastExportJob.id };
+      if (action === 'reveal') {
+        await podcastArtistApi.revealExportOutput(input);
+      } else {
+        await podcastArtistApi.openExportOutput(input);
+      }
+    } catch (outputError) {
+      setAudioError(toErrorMessage(outputError));
+    } finally {
+      setIsAudioBusy(false);
+    }
+  }
+
   function onPreviewAssetFromClip(assetId: string | undefined): void {
     if (!assetId) return;
     setSelectedAudioAssetId(assetId);
@@ -1715,8 +1733,34 @@ function AudioView({
           {isPreparingPlayback ? <div className="notice compact timeline-preparing">正在准备试听…</div> : null}
           {audioError ? <div className="notice error compact">{audioError}</div> : null}
           {lastExportJob ? (
-            <div className={`notice compact ${lastExportJob.status === 'completed' ? 'success' : 'error'}`}>
-              {lastExportJob.status === 'completed' ? `导出完成：${lastExportJob.outputPath}` : lastExportJob.error ?? '导出失败。'}
+            <div
+              className={`notice compact export-result ${lastExportJob.status === 'completed' ? 'success' : 'error'}`}
+            >
+              <span>
+                {lastExportJob.status === 'completed'
+                  ? `导出完成：${lastExportJob.outputPath}`
+                  : lastExportJob.error ?? '导出失败。'}
+              </span>
+              {lastExportJob.status === 'completed' ? (
+                <div className="export-result-actions">
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => void handleExportOutputAction('reveal')}
+                    disabled={isAudioBusy}
+                  >
+                    在 Finder 中显示
+                  </button>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => void handleExportOutputAction('open')}
+                    disabled={isAudioBusy}
+                  >
+                    打开文件
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : null}
 

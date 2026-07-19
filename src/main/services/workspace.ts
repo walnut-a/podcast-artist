@@ -27,6 +27,7 @@ import type {
   DeleteAudioTrackInput,
   ExportAudioInput,
   ExportJob,
+  ExportOutputInput,
   FailResearchTaskInput,
   FileHash,
   GenerateAudioPeaksInput,
@@ -1267,6 +1268,37 @@ export async function exportAudioEditPlan(settings: AppSettings, input: ExportAu
     await writeExportJob(projectRecord.projectRoot, failedJob);
     return failedJob;
   }
+}
+
+export async function resolveExportOutputPath(settings: AppSettings, input: ExportOutputInput): Promise<string> {
+  if (!input.jobId || input.jobId === '.' || input.jobId === '..' || !/^[\p{L}\p{N}._-]+$/u.test(input.jobId)) {
+    throw new Error('Invalid export job id.');
+  }
+
+  const projectRecord = await findProjectById(settings, input.projectId);
+  if (!projectRecord) {
+    throw new Error(`Project not found: ${input.projectId}`);
+  }
+
+  const job = await readJsonFile<ExportJob>(
+    path.join(projectRecord.projectRoot, '.podcast-artist', 'renders', `${input.jobId}.json`)
+  );
+  if (!job || job.id !== input.jobId || job.projectId !== input.projectId || job.status !== 'completed') {
+    throw new Error(`Completed export job not found: ${input.jobId}`);
+  }
+
+  const exportsRoot = path.resolve(projectRecord.projectRoot, 'exports');
+  const outputAbsolutePath = path.resolve(projectRecord.projectRoot, job.outputPath);
+  const relativeOutputPath = path.relative(exportsRoot, outputAbsolutePath);
+  const isInsideExports =
+    relativeOutputPath && !relativeOutputPath.startsWith('..') && !path.isAbsolute(relativeOutputPath);
+  if (!isInsideExports) {
+    throw new Error('Export output path must stay inside the project exports directory.');
+  }
+  if (!(await fileExists(outputAbsolutePath))) {
+    throw new Error(`Export output file not found: ${job.outputPath}`);
+  }
+  return outputAbsolutePath;
 }
 
 async function createProjectDirectories(projectRoot: string): Promise<void> {

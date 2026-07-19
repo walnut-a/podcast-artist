@@ -20,6 +20,7 @@ import type {
   DependencyStatusFile,
   ExportAudioInput,
   ExportJob,
+  ExportOutputInput,
   GenerateAudioPeaksInput,
   InsertAudioGapInput,
   LibraryAsset,
@@ -64,6 +65,8 @@ export interface PodcastArtistApi {
   updateAudioClipTiming(input: UpdateAudioClipTimingInput): Promise<AudioEditPlan>;
   insertAudioGap(input: InsertAudioGapInput): Promise<AudioEditPlan>;
   exportAudioEditPlan(input: ExportAudioInput): Promise<ExportJob>;
+  revealExportOutput(input: ExportOutputInput): Promise<void>;
+  openExportOutput(input: ExportOutputInput): Promise<void>;
   analyzeAudioAsset(input: AudioAssetProcessingInput): Promise<AudioAnalysis>;
   generateAudioProxy(input: AudioAssetProcessingInput): Promise<AudioProxy>;
   generateAudioPeaks(input: GenerateAudioPeaksInput): Promise<AudioPeaks>;
